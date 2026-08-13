@@ -1,1 +1,34 @@
-readme.md
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+npm-debug.log*
+ 
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+poetry.lock.bak
+ 
+# Env files — never commit secrets
+.env
+.env.*
+!.env.example
+ 
+# Editor
+.vscode/*
+!.vscode/extensions.json
+ 
+# OS
+Thumbs.db
+.DS_Store
+ 
+# Supabase
+supabase/.temp/
+
+# Tectonic binary (100MB+, install locally) and ephemeral generation output
+apps/api/bin/
+apps/api/data/
+ 
