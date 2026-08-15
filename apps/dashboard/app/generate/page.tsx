@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import AuthGuard from "@/components/auth-guard";
-import type { CoverLetterFormat, GeneratedFile, GenerateRequest, GenerateResult } from "@/lib/api";
-import { generateApplication } from "@/lib/api";
+import type { CoverLetterFormat, GeneratePart, GeneratedFile, GenerateRequest } from "@/lib/api";
+import { extractScreenshotQuestions, generateApplication } from "@/lib/api";
 
 interface QARow {
   id: string;
@@ -11,14 +11,42 @@ interface QARow {
   answer: string;
 }
 
+interface ToggleState {
+  resume: boolean;
+  letterPdf: boolean;
+  letterText: boolean;
+}
+
+const TOGGLES: { key: keyof ToggleState; label: string }[] = [
+  { key: "resume", label: "Resume" },
+  { key: "letterPdf", label: "Cover letter · PDF" },
+  { key: "letterText", label: "Cover letter · text" },
+];
+
 export default function GeneratePage() {
   const [jobDescription, setJobDescription] = useState("");
   const [rows, setRows] = useState<QARow[]>([]);
-  const [format, setFormat] = useState<CoverLetterFormat>("pdf");
+  const [toggles, setToggles] = useState<ToggleState>({
+    resume: true,
+    letterPdf: true,
+    letterText: false,
+  });
   const [generating, setGenerating] = useState(false);
-  const [result, setResult] = useState<GenerateResult | null>(null);
+  const [resume, setResume] = useState<GeneratedFile | null>(null);
+  const [coverLetterPdf, setCoverLetterPdf] = useState<GeneratedFile | null>(null);
+  const [coverLetterTxt, setCoverLetterTxt] = useState<GeneratedFile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [letterText, setLetterText] = useState<string | null>(null);
+  const [rating, setRating] = useState<number | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [usedMasterCv, setUsedMasterCv] = useState<string | null>(null);
+  const [screenshotFiles, setScreenshotFiles] = useState<File[]>([]);
+  const [extracting, setExtracting] = useState(false);
+  const [screenshotError, setScreenshotError] = useState<string | null>(null);
+
+  function toggle(key: keyof ToggleState) {
+    setToggles((t) => ({ ...t, [key]: !t[key] }));
+  }
 
   function addRow() {
     setRows((r) => [...r, { id: crypto.randomUUID(), question: "", answer: "" }]);
@@ -32,23 +60,87 @@ export default function GeneratePage() {
     setRows((r) => r.filter((row) => row.id !== id));
   }
 
+  async function extractFromScreenshots() {
+    if (screenshotFiles.length === 0) return;
+    setExtracting(true);
+    setScreenshotError(null);
+    try {
+      const qas = await extractScreenshotQuestions(screenshotFiles);
+      const additions: QARow[] = qas
+        .filter((qa) => qa.question.trim())
+        .map((qa) => ({ id: crypto.randomUUID(), question: qa.question, answer: qa.answer }));
+      if (additions.length === 0) {
+        setScreenshotError("No questions were extracted. Try clearer screenshots.");
+        return;
+      }
+      setRows((r) => {
+        const existing = new Set(r.map((row) => row.question.trim().toLowerCase()));
+        return [
+          ...r,
+          ...additions.filter((a) => !existing.has(a.question.trim().toLowerCase())),
+        ];
+      });
+      setScreenshotFiles([]);
+    } catch (e) {
+      setScreenshotError(e instanceof Error ? e.message : "Extraction failed.");
+    } finally {
+      setExtracting(false);
+    }
+  }
+
   async function onGenerate() {
     if (!jobDescription.trim()) {
       setError("Add a job description first.");
       return;
     }
+    const formats: CoverLetterFormat[] = [];
+    if (toggles.letterPdf) formats.push("pdf");
+    if (toggles.letterText) formats.push("text");
+    const parts: GeneratePart[] = ["feedback"];
+    if (toggles.resume) parts.push("resume");
+    if (formats.length > 0) parts.push("cover_letter");
     setError(null);
-    setResult(null);
     setGenerating(true);
+    setResume(null);
+    setCoverLetterPdf(null);
+    setCoverLetterTxt(null);
+    setLetterText(null);
+    setRating(null);
+    setFeedback(null);
+    setUsedMasterCv(null);
     try {
       const req: GenerateRequest = {
         jobDescription,
         answers: rows.map(({ question, answer }) => ({ question, answer })),
-        coverLetterFormat: format,
+        coverLetterFormats: formats,
+        parts,
       };
-      const res = await generateApplication(req);
-      setResult(res);
-      setLetterText(res.coverLetterText);
+      await generateApplication(req, (ev) => {
+        switch (ev.event) {
+          case "used_master_cv":
+            setUsedMasterCv(ev.data.usedMasterCv);
+            break;
+          case "resume":
+            setResume(ev.data);
+            break;
+          case "cover_letter_text":
+            setLetterText(ev.data.text);
+            break;
+          case "cover_letter_txt":
+            setCoverLetterTxt(ev.data);
+            break;
+          case "cover_letter_pdf":
+            setCoverLetterPdf(ev.data);
+            break;
+          case "feedback":
+            setRating(ev.data.rating);
+            setFeedback(ev.data.text);
+            break;
+          case "error":
+            setError(ev.data.message);
+            break;
+        }
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Generation failed.");
     } finally {
@@ -56,14 +148,17 @@ export default function GeneratePage() {
     }
   }
 
+  const hasResults = resume || coverLetterPdf || coverLetterTxt;
+  const showResults = hasResults || rating !== null;
+
   return (
     <AuthGuard>
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold text-uber-black">Generate application</h1>
         <p className="mt-1 text-sm text-uber-gray">
-          Paste a job description, answer optional questions, and generate a tailored cover letter
-          and resume. The resume is auto-matched from your master CVs.
+          Paste a job description, add optional answers, then generate a tailored resume, cover
+          letter, and fit feedback. The resume is auto-matched from your master CVs.
         </p>
       </div>
 
@@ -79,6 +174,60 @@ export default function GeneratePage() {
           rows={8}
           className="mt-2 w-full resize-y rounded-md border border-uber-line bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-uber-green"
         />
+      </section>
+
+      <section className="rounded-lg border border-uber-line bg-background p-5 lg:sticky lg:top-4">
+        <h2 className="text-sm font-medium text-uber-black">Generate</h2>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {TOGGLES.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => toggle(t.key)}
+              aria-pressed={toggles[t.key]}
+              className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+                toggles[t.key]
+                  ? "border-uber-black bg-uber-black text-white"
+                  : "border-uber-line bg-uber-bg text-uber-gray hover:text-uber-black"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={onGenerate}
+          disabled={generating}
+          className="mt-4 w-full rounded-md bg-uber-black px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-uber-green disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {generating ? "Generating…" : "Generate"}
+        </button>
+
+        {error && <p className="mt-3 text-sm font-medium text-red-600">{error}</p>}
+
+        {showResults && (
+          <div className="mt-4 flex flex-col gap-3">
+            {rating !== null && <MatchRating rating={rating} />}
+            {hasResults && (
+              <div className="rounded-md border border-uber-green bg-uber-green-soft p-4">
+                <div className="flex items-center gap-2">
+                  <span className="inline-block h-2.5 w-2.5 rounded-full bg-uber-green" />
+                  <h3 className="text-sm font-semibold text-uber-green-dark">Ready — review and download</h3>
+                </div>
+                {usedMasterCv && (
+                  <p className="mt-1 text-xs text-uber-gray">Master CV matched: {usedMasterCv}</p>
+                )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {resume && <DownloadButton file={resume} label="Custom resume" />}
+                  {coverLetterPdf && <DownloadButton file={coverLetterPdf} label="Cover letter" />}
+                  {coverLetterTxt && <DownloadButton file={coverLetterTxt} label="Cover letter" />}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       <section className="rounded-lg border border-uber-line bg-background p-5">
@@ -119,59 +268,102 @@ export default function GeneratePage() {
             </div>
           ))}
         </div>
-      </section>
-
-      <section className="rounded-lg border border-uber-line bg-background p-5">
-        <h2 className="text-sm font-medium text-uber-black">Cover letter format</h2>
-        <div className="mt-2 inline-flex rounded-md border border-uber-line bg-uber-bg p-0.5">
-          {(["pdf", "text"] as const).map((f) => (
+        <div className="mt-4 border-t border-uber-line pt-4">
+          <p className="text-xs text-uber-gray">
+            Got the questions as a screenshot? Upload the image(s) and the model will answer
+            each question into the list above (uses your OpenRouter key; images are not saved).
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={(e) => setScreenshotFiles(Array.from(e.target.files ?? []))}
+              className="text-sm text-uber-gray"
+            />
             <button
-              key={f}
               type="button"
-              onClick={() => setFormat(f)}
-              className={`rounded px-4 py-1.5 text-sm font-medium transition-colors ${
-                format === f ? "bg-uber-black text-white" : "text-uber-gray hover:text-uber-black"
-              }`}
+              onClick={extractFromScreenshots}
+              disabled={extracting || screenshotFiles.length === 0}
+              className="rounded-md bg-uber-black px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-uber-green disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {f === "pdf" ? "PDF" : "Plain text"}
+              {extracting ? "Extracting…" : "Extract questions & answers"}
             </button>
-          ))}
+          </div>
+          {screenshotError && (
+            <p className="mt-2 text-sm font-medium text-red-600">{screenshotError}</p>
+          )}
         </div>
       </section>
 
-      {error && <p className="text-sm font-medium text-red-600">{error}</p>}
+      {letterText !== null && (
+        <section className="rounded-lg border border-uber-line bg-background p-5">
+          <h2 className="text-sm font-medium text-uber-black">Cover letter preview</h2>
+          <pre className="mt-3 whitespace-pre-wrap rounded-md border border-uber-line bg-white p-4 text-sm">
+            {letterText}
+          </pre>
+        </section>
+      )}
 
-      <button
-        type="button"
-        onClick={onGenerate}
-        disabled={generating}
-        className="rounded-md bg-uber-black px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-uber-green disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {generating ? "Generating…" : "Generate"}
-      </button>
-
-      {result && (
-        <section className="rounded-lg border border-uber-green bg-uber-green-soft p-5">
-          <div className="flex items-center gap-2">
-            <span className="inline-block h-2.5 w-2.5 rounded-full bg-uber-green" />
-            <h2 className="text-sm font-semibold text-uber-green-dark">Ready — review and download</h2>
+      {feedback !== null && (
+        <section className="rounded-lg border border-uber-line bg-background p-5">
+          <h2 className="text-sm font-medium text-uber-black">Feedback</h2>
+          <div className="mt-3 whitespace-pre-wrap rounded-md border border-uber-line bg-white p-4 text-sm">
+            {feedback}
           </div>
-          {result.usedMasterCv && (
-            <p className="mt-1 text-xs text-uber-gray">Master CV matched: {result.usedMasterCv}</p>
-          )}
-          <div className="mt-4 flex flex-wrap gap-3">
-            <DownloadButton file={result.resume} label="Custom resume" />
-            <DownloadButton file={result.coverLetter} label="Cover letter" />
-          </div>
-          {letterText !== null && (
-            <pre className="mt-4 whitespace-pre-wrap rounded-md border border-uber-line bg-white p-4 text-sm">
-              {letterText}
-            </pre>
-          )}
         </section>
       )}
     </div>
     </AuthGuard>
+  );
+}
+
+function MatchRating({ rating }: { rating: number }) {
+  const score = Math.max(0, Math.min(10, rating));
+  const tone =
+    score >= 8
+      ? { badge: "bg-uber-green", bar: "bg-uber-green", label: "Strong match" }
+      : score >= 5
+        ? { badge: "bg-amber-500", bar: "bg-amber-500", label: "Partial match" }
+        : { badge: "bg-red-500", bar: "bg-red-500", label: "Weak match" };
+  return (
+    <div className="flex items-center gap-4 rounded-md border border-uber-line bg-white p-4">
+      <div
+        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-white ${tone.badge}`}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          className="h-6 w-6"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <circle cx="12" cy="12" r="6" />
+          <circle cx="12" cy="12" r="2" />
+        </svg>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-uber-gray">
+            Job match · {tone.label}
+          </p>
+          <p className="text-2xl font-semibold text-uber-black">
+            {score}
+            <span className="text-sm font-normal text-uber-gray">/10</span>
+          </p>
+        </div>
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-uber-bg">
+          <div
+            className={`h-full rounded-full ${tone.bar}`}
+            style={{ width: `${score * 10}%` }}
+          />
+        </div>
+      </div>
+    </div>
   );
 }
 

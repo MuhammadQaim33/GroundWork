@@ -6,6 +6,7 @@ Continuous job-search agent: discovers roles → screens against real resume →
 Cold applications convert to interviews at ~2–8%; the average posting draws ~242 applicants; ~75% of resumes are rejected by ATS keyword screens before a human reads them. **Volume is the weak lever.** Every pillar targets a strong lever instead: be early (Radar) · survive the screen (Armory) · be specific (Scout) · afford to be selective (Doorway) · convert the interviews you do land (Coach) · learn what works (Analytics).
 
 ## Non-Negotiable Design Rules
+- **MULTI-USER SAAS APP.** Groundwork is a multi-tenant SaaS, not a local tool. Every user's data is tenant-scoped in Supabase with RLS (per-user rows, per-user storage). **No changes may ever be saved LOCALLY** — no state written to local disk, no JSON files as persistence, no file-based settings or caches. All user data (settings, API keys, uploads, generations, outcomes) lives in the database/storage keyed by the user. Local filesystem writes are forbidden for anything user-facing or cross-request.
 - **Discovery automated, submission human.** Agent fills forms, verifies, stops at submit — always.
 - **LinkedIn = discovery only**, never automated/submitted to (read via email alerts → Gmail API → parsed).
 - **Grounded, never fabricated.** Every generated claim (letters, resume edits, interview answers) traces to a `resume_evidence` row. Adversarial validator classifies SUPPORTED/EMBELLISHED/FABRICATED; fabrications are stripped and regenerated.
@@ -54,6 +55,8 @@ Cut order if behind schedule: (1) optional modules → (2) voice mode (text-only
 ## Working Agreement
 - **Before starting work each session: read `TODO.md`** to see what's done and what's left for today. Ground every task in its "Today" section — don't scope-creep beyond it.
 - **Log everything you do**: after completing each task, append the result under a "done" section in `TODO.md` so the next session can see exactly what's finished and what remains.
+- **Schema changes: always update `schema.md`.** Every time a schema change is made (new/renamed/dropped table or column, constraint, index, or relationship), record it in `schema.md` in the same task — don't leave it for later.
+- **Read `schema.md` to understand the data model**: before touching anything data-related, refer to `schema.md` to see how the tables relate to each other (FKs, tenant-scoping, RLS).
 
 ## Risks
 - Browser agents break → DOM-first + vision fallback + hard step budgets; ATS layout drift caught by a fixture eval suite (saved real forms) measuring fill accuracy per ATS.

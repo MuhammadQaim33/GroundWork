@@ -3,10 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import Header, HTTPException
+from starlette.concurrency import run_in_threadpool
 from supabase import create_client
 
 from config import settings
-from store import client, create_service_user, get_service_user
+from store import client, create_service_user
+from user_settings import set_current_service_user
 
 _BEARER = "Bearer "
 
@@ -23,23 +25,26 @@ def _user_from_token(authorization: str | None) -> Any:
         raise HTTPException(401, "Invalid or expired token") from exc
 
 
-def require_service_user(
+async def require_service_user(
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    """Resolve the calling service_user from a Supabase JWT.
+    """Resolve the calling service_user from the Supabase JWT.
 
     The token is validated through the Supabase auth server (not decoded
-    locally); the linked service_users.id is read from the user's
-    app_metadata.service_user_id, set at onboarding.
+    locally); the service_users.id is read straight from the returned user's
+    app_metadata.service_user_id claim, set at onboarding — no per-request
+    DB lookup. The id is also published on a per-request contextvar so
+    settings access (user_settings.py) is scoped to the same user without
+    threading a parameter through every call.
     """
-    user = _user_from_token(authorization)
-    service_user_id = (user.app_metadata or {}).get("service_user_id")
+    user = await run_in_threadpool(_user_from_token, authorization)
+    app_metadata = user.app_metadata or {}
+    service_user_id = app_metadata.get("service_user_id")
     if not service_user_id:
         raise HTTPException(401, "Account not onboarded")
-    service_user = get_service_user(int(service_user_id))
-    if not service_user:
-        raise HTTPException(401, "Account not onboarded")
-    return service_user
+    set_current_service_user(int(service_user_id))
+    name = (user.user_metadata or {}).get("n") or app_metadata.get("n")
+    return {"id": int(service_user_id), "name": (str(name) if name else "").strip()}
 
 
 def _onboard(auth_user: Any) -> int:

@@ -7,13 +7,20 @@ import {
   addMasterCV,
   clearBragDoc,
   getBragDoc,
+  getLinks,
   getLlmSettings,
   listMasterCVs,
   removeMasterCV,
   setBragDoc,
+  setLinks,
   setOpenRouterKey,
   setPreferredMasterCV,
 } from "@/lib/api";
+
+interface LinkRow {
+  id: string;
+  value: string;
+}
 
 export default function SettingsPage() {
   const [cvs, setCvs] = useState<MasterCV[]>([]);
@@ -26,15 +33,24 @@ export default function SettingsPage() {
   const [llmSaved, setLlmSaved] = useState(false);
   const [keyInput, setKeyInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [linkRows, setLinkRows] = useState<LinkRow[]>([]);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [linksSaved, setLinksSaved] = useState(false);
 
   useEffect(() => {
     let alive = true;
     (async () => {
-      const [c, b, l] = await Promise.all([listMasterCVs(), getBragDoc(), getLlmSettings()]);
+      const [c, b, l, links] = await Promise.all([
+        listMasterCVs(),
+        getBragDoc(),
+        getLlmSettings(),
+        getLinks(),
+      ]);
       if (alive) {
         setCvs(c);
         setBrag(b);
         setLlm(l);
+        setLinkRows(links.map((value) => ({ id: crypto.randomUUID(), value })));
         setLoaded(true);
       }
     })().catch(() => {
@@ -44,6 +60,36 @@ export default function SettingsPage() {
       alive = false;
     };
   }, []);
+
+  function addLinkRow() {
+    setLinkRows((r) => [...r, { id: crypto.randomUUID(), value: "" }]);
+  }
+
+  function updateLinkRow(id: string, value: string) {
+    setLinkRows((r) => r.map((row) => (row.id === id ? { ...row, value } : row)));
+    setLinksSaved(false);
+  }
+
+  function removeLinkRow(id: string) {
+    setLinkRows((r) => r.filter((row) => row.id !== id));
+    setLinksSaved(false);
+  }
+
+  async function onSaveLinks() {
+    const links = linkRows.map((row) => row.value.trim()).filter(Boolean);
+    setLinkError(null);
+    setLinksSaved(false);
+    setBusy(true);
+    try {
+      await setLinks(links);
+      setLinkRows(links.map((value) => ({ id: crypto.randomUUID(), value })));
+      setLinksSaved(true);
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : "Save failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function onCvUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -281,6 +327,62 @@ export default function SettingsPage() {
         ) : (
           loaded && <p className="mt-4 text-sm text-uber-gray">No brag document yet — optional.</p>
         )}
+      </section>
+
+      <section className="rounded-lg border border-uber-line bg-background p-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-medium text-uber-black">Links</h2>
+            <p className="mt-0.5 text-xs text-uber-gray">
+              Any number of links you want the generator to know about — GitHub, LinkedIn, or
+              portfolio. Saved to your profile.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={addLinkRow}
+            className="rounded-md bg-uber-black px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-uber-green"
+          >
+            + Add link
+          </button>
+        </div>
+
+        <div className="mt-3 flex flex-col gap-3">
+          {loaded && linkRows.length === 0 && (
+            <p className="text-sm text-uber-gray">No links yet — e.g. github.com/you, linkedin.com/in/you.</p>
+          )}
+          {linkRows.map((row) => (
+            <div key={row.id} className="flex items-start gap-2">
+              <input
+                value={row.value}
+                onChange={(e) => updateLinkRow(row.id, e.target.value)}
+                placeholder="https://…"
+                className="flex-1 rounded-md border border-uber-line bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-uber-green"
+              />
+              <button
+                type="button"
+                onClick={() => removeLinkRow(row.id)}
+                aria-label="Remove link"
+                className="rounded-md px-2 py-2 text-uber-gray transition-colors hover:bg-uber-green-soft hover:text-uber-green-dark"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onSaveLinks}
+            disabled={busy}
+            className="rounded-md bg-uber-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-uber-green disabled:opacity-50"
+          >
+            Save links
+          </button>
+          {linkError && <p className="text-sm font-medium text-red-600">{linkError}</p>}
+          {linksSaved && <p className="text-sm font-medium text-uber-green-dark">Links saved.</p>}
+        </div>
       </section>
     </div>
     </AuthGuard>

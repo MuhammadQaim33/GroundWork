@@ -1,31 +1,49 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
+from contextvars import ContextVar
 
 from config import settings
+from store import get_service_user, set_service_user_links, set_service_user_openrouter_key
 
-SETTINGS_PATH = Path(__file__).resolve().parent / "data" / "user_settings.json"
+# The service_users.id resolved from the JWT's app_metadata.service_user_id
+# custom claim. Set per-request by auth.require_service_user; read by
+# get/set_openrouter_key so LLM provider selection is per-user, not global.
+current_service_user_id: ContextVar[int | None] = ContextVar(
+    "current_service_user_id", default=None
+)
 
 
-def _load() -> dict[str, str]:
-    try:
-        return json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-
-
-def _save(data: dict[str, str]) -> None:
-    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(json.dumps(data), encoding="utf-8")
+def set_current_service_user(service_user_id: int | None) -> None:
+    current_service_user_id.set(service_user_id)
 
 
 def get_openrouter_key() -> str:
-    """Key saved in the UI wins; the env var is only a deploy-time default."""
-    return _load().get("openrouter_api_key", "") or settings.openrouter_api_key
+    """Key saved for the current user wins; the env var is only a deploy default."""
+    service_user_id = current_service_user_id.get()
+    if service_user_id is not None:
+        row = get_service_user(service_user_id)
+        if row and row.get("openrouter_api_key"):
+            return row["openrouter_api_key"]
+    return settings.openrouter_api_key
 
 
-def set_openrouter_key(key: str) -> None:
-    data = _load()
-    data["openrouter_api_key"] = key.strip()
-    _save(data)
+def set_openrouter_key(key: str, service_user_id: int | None = None) -> None:
+    sid = service_user_id if service_user_id is not None else current_service_user_id.get()
+    if sid is None:
+        raise RuntimeError("set_openrouter_key requires the request's service user")
+    set_service_user_openrouter_key(sid, key.strip())
+
+
+def get_links() -> list[str]:
+    service_user_id = current_service_user_id.get()
+    if service_user_id is None:
+        return []
+    row = get_service_user(service_user_id)
+    return list(row.get("links") or []) if row else []
+
+
+def set_links(links: list[str], service_user_id: int | None = None) -> None:
+    sid = service_user_id if service_user_id is not None else current_service_user_id.get()
+    if sid is None:
+        raise RuntimeError("set_links requires the request's service user")
+    set_service_user_links(sid, links)

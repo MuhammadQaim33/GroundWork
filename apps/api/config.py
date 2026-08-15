@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     llm_provider: str = "groq"
     llm_model: str = "llama-3.3-70b-versatile"
     openrouter_model: str = "meta-llama/llama-3.3-70b-instruct"
+    openrouter_vision_model: str = "google/gemini-2.5-flash"
     ollama_base_url: str = "http://localhost:11434/v1"
     ollama_model: str = "qwen2.5:14b"
 

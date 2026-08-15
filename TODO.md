@@ -36,6 +36,196 @@ and set a descriptive User-Agent. These are free public endpoints offered in goo
 
 # Done
 
+## 2026-08-15 — Feedback non-optional + 1-10 job-match rating with UI
+
+- **Feedback is always generated.** The Feedback toggle is gone from `/generate`; the
+  backend emits a `feedback` event unconditionally (no longer gated on `parts`), and the
+  master CV is always loaded (feedback always needs it). `GenerateRequest.parts` still
+  accepts `"feedback"` for backward compat, but it's ignored.
+- **Rating + concise output.** `FEEDBACK_SYSTEM` now asks for JSON `{"rating": 1-10,
+  "feedback": "..."}` (max 6 bullets, concise). `_feedback` returns `(rating, text)`
+  via new `_parse_feedback` (handles fences, clamps rating 1-10, falls back to
+  `(None, raw)` on bad JSON). SSE event: `{"rating": rating, "text": feedback}`.
+- **Rating UI.** New `MatchRating` card at the top of the results panel: circular logo
+  badge (target icon, green/amber/red by score), `N/10` score, and a progress bar.
+  Frontend `GenerateEvent.feedback` now carries `rating`; `rating` state drives the card.
+- Tests: `_parse_feedback` (rating/text/clamp/garbage) + stream always-emits-feedback
+  added (19 pass; 2 pre-existing prompt-string failures remain). `ruff` clean for new
+  code, `npm run lint` ✓, `npm run build` ✓.
+
+## 2026-08-15 — Screenshot questions: vision extracts + answers into the Q&A list
+
+- New `POST /api/screenshot-questions`: accepts up to 6 image uploads, reads them into
+  memory, base64s them into the vision call as data URIs — **never saved** to disk, storage,
+  or DB. Model extracts every visible question and answers each in the candidate's voice,
+  grounded in the master CV + full brag doc (never invents experience/metrics). Returns
+  `[{question, answer}, ...]`.
+- Vision runs through **OpenRouter (BYOK)** only — `vision_chat` in `llm.py` sends
+  `image_url` content parts to `openrouter_vision_model` (default
+  `google/gemini-2.5-flash`, overridable via `OPENROUTER_VISION_MODEL`; the earlier
+  `gemini-2.0-flash-001` default 404'd — model slug retired). Clear error if no OpenRouter
+  key (free-tier Groq is text-only). Images capped at 5MB each.
+- Helpers: pure `_screenshot_questions_prompt` + `_parse_question_answers` (handles bare
+  array, `{questions:[...]}`, markdown fences, garbage → clamps via `_clamp_answers`).
+- Frontend: "Optional questions" card gains a screenshot file-picker + **Extract questions
+  & answers** button; extracted Q&A rows are appended to the list (deduped by question).
+  `extractScreenshotQuestions` in `lib/api.ts`.
+- Checks: `pytest` 18 pass (2 pre-existing prompt-string failures remain), `ruff` clean for
+  new code, `npm run lint` ✓, `npm run build` ✓. No schema change.
+
+## 2026-08-15 — Generate streams each artifact as it's ready (SSE)
+
+- `/api/generate` now returns `text/event-stream` and emits each artifact the moment it
+  finishes, instead of one JSON blob at the end: `used_master_cv` (immediately), `resume`
+  (after fine-tune + compile), `cover_letter_text` → `cover_letter_txt`/`cover_letter_pdf`,
+  `feedback`, then `done`. A failed part emits an `error` event and the rest still run
+  (per-part try/except in `_generate_stream`). Pre-stream validation (400s) unchanged.
+- `FileOut`/`GenerateResult` removed (files now embedded in SSE event data).
+- Frontend `generateApplication(req, onEvent)` streams the body via `fetch` + reader,
+  parses SSE (`readSSE`/`dispatchEvent`), refreshes on 401 like the rest. `/generate`
+  updates each panel as events arrive instead of all-or-nothing.
+- Tests: `test_generate_stream_emits_each_part_in_order` +
+  `test_generate_stream_partial_failure_isolates_the_part` (4 pass). Lint ✓, build ✓.
+  The 2 remaining pytest failures are the pre-existing prompt-string mismatches.
+
+## 2026-08-15 — Generate page: full brag doc + toggles + feedback
+
+- **Full brag doc to model calls.** `api_generate` no longer summarizes the brag doc —
+  `_summarize_brag` / `BRAG_SUMMARY_SYSTEM` / `set_brag_summary` deleted; the raw stored
+  brag doc is passed verbatim to `_fine_tune` and the new feedback call. Groq free-tier
+  budget is still guarded by `_fit_max_tokens` (clear 400 if the full doc overshoots).
+  `module_brag_docs.summary` column left in place but unused (noted in schema.md).
+- **New `feedback` part.** `GenerateRequest.parts` now accepts `"feedback"`; new
+  `_feedback` + pure `_feedback_prompt` (grounded only in resume + brag doc + JD, always
+  bullet-point output). Returns as `GenerateResult.feedback`. Test added:
+  `test_feedback_prompt_grounded_in_resume_and_brag_and_bullets`.
+- **Cover letter now emits both formats.** `cover_letter_format` (single) → `cover_letter_formats`
+  (list); result splits into `cover_letter_pdf` / `cover_letter_txt` so one request can return
+  PDF and plain-text versions of the same letter.
+- **Frontend `/generate`:** the two buttons replaced by four option toggles (Resume · Cover
+  letter PDF · Cover letter text · Feedback) + one **Generate** button (disabled when nothing
+  selected). Feedback renders as a bullet list in its own card; results reset between runs so
+  stale files never linger. `lib/api.ts` types/request/result mapping updated to match.
+- Checks: `poetry run pytest` 14 pass (+1 new feedback test); the 2 failures are
+  pre-existing (prompt strings the uncommitted `main.py` no longer contains — untouched here).
+  `ruff` clean for new code (2 pre-existing E501 nits remain). `npm run lint` ✓, `npm run build` ✓.
+- Schema: no migration; `summary` column usage retired (schema.md updated).
+
+## 2026-08-13 — Resume fine-tune: preserve content and metrics
+
+- `FINE_TUNE_SYSTEM` rewritten: "PRESERVE ALL CONTENT: keep every section, bullet, and metric —
+  never delete, condense, summarize, or shorten anything. Numbers and metrics must appear EXACTLY
+  as written in the source. The tailored resume must be at least as detailed as the master."
+  Reorder/re-emphasize only.
+- `_fine_tune` output token floor raised 1500 → 3000 so the model isn't forced to truncate a full
+  resume on limited budgets (checked: still fits the Groq free-tier TPM budget).
+- Test: `test_fine_tune_prompt_never_trims_content_or_metrics` pins the preservation clauses
+  (15 pass). Ruff clean for new code.
+
+## 2026-08-13 — Cover letter: ASD-STE100 prompt + PDF download button
+
+- `_cover_letter_prompt` system prompt now instructs ASD-STE100 (Simplified Technical English):
+  short sentences, one idea per sentence, simple unambiguous vocabulary. Test asserts
+  `ASD-STE100` in the prompt.
+- Fixed the missing PDF cover-letter download: `lib/api.ts` `generateApplication` always mapped
+  the cover letter to the text version (backend returns `cover_letter_text` even in PDF mode), so
+  the download button never produced the PDF. Now maps the server's actual `cover_letter` file
+  (PDF with url in pdf mode, text file in text mode); `text` populated only as the fallback
+  content. Button now shows `Cover letter · PDF` in pdf mode.
+- Checks: pytest 14 ✓, ruff clean for new code, lint ✓, build ✓.
+
+## 2026-08-13 — Cover letter: model gets user name + links
+
+- `auth.py` `require_service_user` now returns `name` from the JWT's `n` claim
+  (`user_metadata.n` preferred, fallback `app_metadata.n`).
+- `main.py` `api_generate` passes `_sv["name"]` + `get_links()` into `_cover_letter`.
+- `_cover_letter` refactored: prompt building extracted to `_cover_letter_prompt(job, answers,
+  cv_name, name, links)` (pure, testable). System prompt signs with the real name when present
+  (else keeps `[Your Name]`) and instructs listing the links at the bottom under a "Links:"
+  heading; name + links are injected into the user message. No name/links → prior behavior.
+- Tests: `_cover_letter_prompt` includes name/links and drops placeholder when name present (14
+  pass). Ruff clean for new code (baseline 3 E501 nits remain in main.py, pre-existing).
+- No schema change; no frontend change.
+
+## 2026-08-13 — CLAUDE.md schema discipline + schema.md
+
+- CLAUDE.md Working Agreement: added "Schema changes: always update `schema.md`" and "Read
+  `schema.md` to understand the data model" rules.
+- Created `schema.md` (repo root) documenting the current tables, relationships, tenant-scoping
+  claims, RLS status, and a changelog; recorded the `service_users.links` changes.
+
+## 2026-08-13 — Links on service_users + settings section
+
+- Migration `20260813200000_service_users_links.sql` (PUSHED ✓ via `supabase db push`):
+  `service_users.links text[] not null default '{}'`, same row the JWT's
+  `app_metadata.service_user_id` claim points at. Remote `migration list` confirms all 6 versions
+  applied. (Note: run the CLI from repo root — from `supabase/` it resolves the wrong project root.)
+- `store.py`: `set_service_user_links(user_id, links)`; `get_service_user` already selects `*`.
+- `user_settings.py`: `get_links` / `set_links` scoped to `current_service_user_id` (contextvar set
+  by `auth.require_service_user` from the JWT claim — no per-request DB id lookup).
+- `main.py`: `GET /api/links` + `PUT /api/links` with `_clamp_links` (trim, drop blanks, cap 2048
+  chars / 50 links).
+- `apps/dashboard/lib/api.ts`: `getLinks` / `setLinks`.
+- `/settings`: "Links" card (same add/remove-row UX as generate-page optional questions) + Save
+  links button with saved/error state; loaded alongside CVs/brag/LLM settings.
+- Checks: `poetry run pytest` 12 ✓ (new `_clamp_links` test), `ruff` (5 pre-existing E501 nits,
+  none new), `npm run lint` ✓, `npm run build` ✓.
+
+## 2026-08-13 — Generate page: improved UX layout
+
+- Reordered `/generate`: Job description → **sticky "Generate" panel** (two side-by-side buttons,
+  cover-letter format toggle, error line, green "Ready — review and download" block) → Optional
+  questions → Cover letter preview card (full text shown outside the sticky panel so it never
+  overflows the viewport).
+- Generate panel is `lg:sticky lg:top-4` so the actions + downloads stay visible while filling in a
+  long Q&A list. Format toggle moved into the panel (it only affects the cover letter). Letter
+  preview moved to its own card below the form instead of living in the download block.
+- No logic changes — pure JSX rearrangement. Checks: `npm run lint` ✓, `npm run build` ✓.
+
+## 2026-08-13 — Generate page: split into two async buttons (resume / cover letter)
+
+- `apps/api/main.py`: `GenerateRequest.parts` (`["resume", "cover_letter"]`, defaults to both for
+  backward compat); `GenerateResult.resume`/`cover_letter` now nullable; `/api/generate` branches —
+  resume-only skips the Groq 18KB master-CV guard (that limit only applies to fine-tuning).
+- `apps/dashboard/lib/api.ts`: `GenerateRequest.parts`, `GenerateResult.resume`/`coverLetter` now
+  `GeneratedFile | null`, `generateApplication` forwards `parts`.
+- `apps/dashboard/app/generate/page.tsx`: two buttons — **Generate resume** and **Generate cover
+  letter** — each fires its own request with independent busy/result state, so both can run in
+  parallel and complete independently; results panel shows only what has been generated.
+- Checks: `npm run lint` ✓, `npm run build` ✓, `poetry run pytest` 11 ✓.
+
+## 2026-08-13 — Scoped generator module data per service user
+
+- Migration `20260813150000_scope_module_tables_by_service_user.sql` (pushed): `module_master_cvs` +
+  `module_brag_docs` get `service_user_id bigint not null references service_users(id) on delete cascade`
+  + index. Tables were empty at migration time (verified remote), so no backfill needed.
+- `store.py`: `upload_cv`/`list_cvs`/`get_cv`/`delete_cv`/`set_cv_preferred`/`get_brag`/`upload_brag`/
+  `delete_brag`/`set_brag_summary` now take/scope by `service_user_id`; `main.py` passes `_sv["id"]`
+  from the JWT-resolved claim.
+- Smoke-tested via service role: user 19 round-trips upload→list→delete; an unrelated id (99) sees
+  no rows. `pytest` 11 ✓, `ruff` ✓.
+- Known follow-ups: buckets still shared (no per-user storage folders yet, fine while service-role);
+  no RLS policies on these tables (app only talks service-role today).
+
+## 2026-08-13 — Moved settings storage off disk into Supabase (multi-user rule)
+
+- Migration `20260813120000_user_settings_in_db.sql` (pushed): `service_users.openrouter_api_key text not null default ''`
+  + `module_brag_docs.summary text`. Deleted local `data/user_settings.json` and `data/brag_summary.json`.
+- `user_settings.py` rewritten: `current_service_user_id` ContextVar (set per-request by
+  `auth.require_service_user`, which reads the `app_metadata.service_user_id` claim from the JWT);
+  `get/set_openrouter_key` read/write the service_users row, env var stays a deploy-time default.
+- `auth.require_service_user` is now async (blocking auth/DB calls via `run_in_threadpool`) and sets
+  the contextvar, so provider resolution deep in the generation pipeline stays per-user.
+  Follow-up: dropped the per-request `service_users` row fetch — the id comes straight from the
+  validated JWT's `app_metadata.service_user_id` claim; `get_service_user` remains only for the
+  OpenRouter-key read in `user_settings.py`.
+- `store.py`: `set_service_user_openrouter_key`, `set_brag_summary`; `main.py` brag-summary cache now
+  lives on the doc's row instead of a local JSON file.
+- Tests: `test_llm.py` rewritten to fake the store + contextvar instead of the JSON file; `pytest` 11 ✓,
+  `ruff` ✓ (5 pre-existing E501 line-length nits remain, untouched).
+- Known follow-up (not done): `module_master_cvs`/`module_brag_docs` are still single-user (no user
+  column, no RLS); compiled PDFs still go to `apps/api/data/out/` (ephemeral output, not state).
+
 ## 2026-08-13 — Cleanup: removed unused code
 
 - Deleted Radar/ingestion scaffolding that nothing imports: `apps/api/adapters/` (`remoteok.py`,

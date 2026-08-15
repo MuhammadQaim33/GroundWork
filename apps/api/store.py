@@ -21,23 +21,39 @@ def client() -> Client:
     return _client
 
 
-def upload_cv(file_name: str, data: bytes) -> dict[str, Any]:
+def upload_cv(file_name: str, data: bytes, service_user_id: int) -> dict[str, Any]:
     storage_path = f"{uuid4().hex[:8]}-{file_name}"
     client().storage.from_("master-cvs").upload(
         storage_path, data, FileOptions(content_type="application/x-tex")
     )
     row = client().table("module_master_cvs").insert(
-        {"file_name": file_name, "storage_path": storage_path}
+        {"file_name": file_name, "storage_path": storage_path, "service_user_id": service_user_id}
     ).execute()
     return row.data[0]
 
 
-def list_cvs() -> list[dict[str, Any]]:
-    return client().table("module_master_cvs").select("*").order("created_at").execute().data
+def list_cvs(service_user_id: int) -> list[dict[str, Any]]:
+    return (
+        client()
+        .table("module_master_cvs")
+        .select("*")
+        .eq("service_user_id", service_user_id)
+        .order("created_at")
+        .execute()
+        .data
+    )
 
 
-def get_cv(cv_id: int) -> dict[str, Any] | None:
-    rows = client().table("module_master_cvs").select("*").eq("id", cv_id).execute().data
+def get_cv(cv_id: int, service_user_id: int) -> dict[str, Any] | None:
+    rows = (
+        client()
+        .table("module_master_cvs")
+        .select("*")
+        .eq("id", cv_id)
+        .eq("service_user_id", service_user_id)
+        .execute()
+        .data
+    )
     return rows[0] if rows else None
 
 
@@ -45,30 +61,42 @@ def cv_content(cv: dict[str, Any]) -> bytes:
     return client().storage.from_("master-cvs").download(cv["storage_path"])
 
 
-def delete_cv(cv_id: int) -> None:
-    cv = get_cv(cv_id)
+def delete_cv(cv_id: int, service_user_id: int) -> None:
+    cv = get_cv(cv_id, service_user_id)
     if not cv:
         return
     client().storage.from_("master-cvs").remove([cv["storage_path"]])
     client().table("module_master_cvs").delete().eq("id", cv_id).execute()
 
 
-def set_cv_preferred(cv_id: int) -> None:
-    client().table("module_master_cvs").update({"preferred": False}).neq("preferred", False).execute()
-    client().table("module_master_cvs").update({"preferred": True}).eq("id", cv_id).execute()
+def set_cv_preferred(cv_id: int, service_user_id: int) -> None:
+    client().table("module_master_cvs").update({"preferred": False}).eq(
+        "service_user_id", service_user_id
+    ).neq("preferred", False).execute()
+    client().table("module_master_cvs").update({"preferred": True}).eq("id", cv_id).eq(
+        "service_user_id", service_user_id
+    ).execute()
 
 
-def get_brag() -> dict[str, Any] | None:
-    rows = client().table("module_brag_docs").select("*").limit(1).execute().data
+def get_brag(service_user_id: int) -> dict[str, Any] | None:
+    rows = (
+        client()
+        .table("module_brag_docs")
+        .select("*")
+        .eq("service_user_id", service_user_id)
+        .limit(1)
+        .execute()
+        .data
+    )
     return rows[0] if rows else None
 
 
-def upload_brag(file_name: str, data: bytes) -> dict[str, Any]:
+def upload_brag(file_name: str, data: bytes, service_user_id: int) -> dict[str, Any]:
     storage_path = f"{uuid4().hex[:8]}-{file_name}"
     client().storage.from_("brag-docs").upload(
         storage_path, data, FileOptions(content_type="text/markdown")
     )
-    existing = get_brag()
+    existing = get_brag(service_user_id)
     if existing:
         client().storage.from_("brag-docs").remove([existing["storage_path"]])
         row = client().table("module_brag_docs").update(
@@ -76,7 +104,11 @@ def upload_brag(file_name: str, data: bytes) -> dict[str, Any]:
         ).eq("id", existing["id"]).execute()
     else:
         row = client().table("module_brag_docs").insert(
-            {"file_name": file_name, "storage_path": storage_path}
+            {
+                "file_name": file_name,
+                "storage_path": storage_path,
+                "service_user_id": service_user_id,
+            }
         ).execute()
     return row.data[0]
 
@@ -87,8 +119,8 @@ def brag_content(brag: dict[str, Any]) -> str:
     )
 
 
-def delete_brag() -> None:
-    brag = get_brag()
+def delete_brag(service_user_id: int) -> None:
+    brag = get_brag(service_user_id)
     if not brag:
         return
     client().storage.from_("brag-docs").remove([brag["storage_path"]])
@@ -109,3 +141,11 @@ def create_service_user() -> dict[str, Any]:
 def get_service_user(user_id: int) -> dict[str, Any] | None:
     rows = client().table("service_users").select("*").eq("id", user_id).execute().data
     return rows[0] if rows else None
+
+
+def set_service_user_openrouter_key(user_id: int, key: str) -> None:
+    client().table("service_users").update({"openrouter_api_key": key}).eq("id", user_id).execute()
+
+
+def set_service_user_links(user_id: int, links: list[str]) -> None:
+    client().table("service_users").update({"links": links}).eq("id", user_id).execute()

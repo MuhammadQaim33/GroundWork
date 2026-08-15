@@ -7,6 +7,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 import { clearSession, getSession, setSession, type Session } from "@/lib/session";
 
 export type CoverLetterFormat = "pdf" | "text";
+export type GeneratePart = "resume" | "cover_letter" | "feedback";
 
 export interface MasterCV {
   id: number;
@@ -34,7 +35,8 @@ export interface JobAnswer {
 export interface GenerateRequest {
   jobDescription: string;
   answers: JobAnswer[];
-  coverLetterFormat: CoverLetterFormat;
+  coverLetterFormats: CoverLetterFormat[];
+  parts?: GeneratePart[];
 }
 
 export interface GeneratedFile {
@@ -44,12 +46,15 @@ export interface GeneratedFile {
   text?: string;
 }
 
-export interface GenerateResult {
-  resume: GeneratedFile;
-  coverLetter: GeneratedFile;
-  coverLetterText: string | null;
-  usedMasterCv: string | null;
-}
+export type GenerateEvent =
+  | { event: "used_master_cv"; data: { usedMasterCv: string } }
+  | { event: "resume"; data: GeneratedFile }
+  | { event: "cover_letter_text"; data: { text: string } }
+  | { event: "cover_letter_txt"; data: GeneratedFile }
+  | { event: "cover_letter_pdf"; data: GeneratedFile }
+  | { event: "feedback"; data: { rating: number | null; text: string } }
+  | { event: "error"; data: { message: string; part?: string } }
+  | { event: "done"; data: null };
 
 interface ServerCV {
   id: number;
@@ -73,13 +78,7 @@ interface ServerFile {
   name: string;
   kind: "pdf" | "text";
   url: string | null;
-}
-
-interface ServerGenerateResult {
-  resume: ServerFile;
-  cover_letter: ServerFile;
-  cover_letter_text: string | null;
-  used_master_cv: string | null;
+  text?: string;
 }
 
 interface ServerAuthResult {
@@ -251,31 +250,149 @@ export async function setOpenRouterKey(key: string): Promise<void> {
   });
 }
 
-export async function generateApplication(req: GenerateRequest): Promise<GenerateResult> {
-  const res = await request<ServerGenerateResult>("/api/generate", {
-    method: "POST",
+export async function getLinks(): Promise<string[]> {
+  const res = await request<{ links: string[] }>("/api/links");
+  return res.links;
+}
+
+export async function setLinks(links: string[]): Promise<void> {
+  await request("/api/links", {
+    method: "PUT",
     headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ links }),
+  });
+}
+
+export async function extractScreenshotQuestions(files: File[]): Promise<JobAnswer[]> {
+  const form = new FormData();
+  for (const f of files) form.append("files", f);
+  return request<JobAnswer[]>("/api/screenshot-questions", {
+    method: "POST",
+    body: form,
+  });
+}
+
+interface RawSseEvent {
+  event: string;
+  data: unknown;
+}
+
+function mapFile(f: ServerFile): GeneratedFile {
+  return {
+    name: f.name,
+    kind: f.kind,
+    url: f.url ? absolute(f.url) : undefined,
+    text: f.text,
+  };
+}
+
+function dispatchEvent(raw: RawSseEvent, onEvent: (ev: GenerateEvent) => void): void {
+  switch (raw.event) {
+    case "used_master_cv":
+      onEvent({
+        event: "used_master_cv",
+        data: { usedMasterCv: (raw.data as { used_master_cv: string }).used_master_cv },
+      });
+      break;
+    case "resume":
+      onEvent({ event: "resume", data: mapFile(raw.data as ServerFile) });
+      break;
+    case "cover_letter_text":
+      onEvent({ event: "cover_letter_text", data: { text: (raw.data as { text: string }).text } });
+      break;
+    case "cover_letter_txt":
+      onEvent({ event: "cover_letter_txt", data: mapFile(raw.data as ServerFile) });
+      break;
+    case "cover_letter_pdf":
+      onEvent({ event: "cover_letter_pdf", data: mapFile(raw.data as ServerFile) });
+      break;
+    case "feedback": {
+      const f = raw.data as { rating?: number | null; text: string };
+      onEvent({ event: "feedback", data: { rating: f.rating ?? null, text: f.text } });
+      break;
+    }
+    case "error": {
+      const e = raw.data as { message: string; part?: string };
+      onEvent({ event: "error", data: { message: e.message, part: e.part } });
+      break;
+    }
+    case "done":
+      onEvent({ event: "done", data: null });
+      break;
+  }
+}
+
+async function readSSE(body: ReadableStream<Uint8Array>, onRaw: (ev: RawSseEvent) => void): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let sep = buffer.indexOf("\n\n");
+    while (sep !== -1) {
+      const block = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      let event = "message";
+      const dataLines: string[] = [];
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+      }
+      if (dataLines.length > 0) {
+        let data: unknown = null;
+        try {
+          data = JSON.parse(dataLines.join("\n"));
+        } catch {
+          // malformed payload — skip the event
+        }
+        onRaw({ event, data });
+      }
+      sep = buffer.indexOf("\n\n");
+    }
+  }
+}
+
+export async function generateApplication(
+  req: GenerateRequest,
+  onEvent: (ev: GenerateEvent) => void,
+  retried = false
+): Promise<void> {
+  const session = getSession();
+  const headers = new Headers({ "Content-Type": "application/json" });
+  if (session) headers.set("Authorization", `Bearer ${session.accessToken}`);
+  const res = await fetch(`${API_URL}/api/generate`, {
+    method: "POST",
+    headers,
     body: JSON.stringify({
       job_description: req.jobDescription,
       answers: req.answers,
-      cover_letter_format: req.coverLetterFormat,
+      cover_letter_formats: req.coverLetterFormats,
+      parts: req.parts ?? ["resume", "cover_letter"],
     }),
   });
-  return {
-    resume: {
-      name: res.resume.name,
-      kind: res.resume.kind,
-      url: res.resume.url ? absolute(res.resume.url) : undefined,
-    },
-    coverLetter:
-      res.cover_letter_text != null
-        ? { name: "cover-letter.txt", kind: "text", text: res.cover_letter_text }
-        : {
-            name: res.cover_letter.name,
-            kind: res.cover_letter.kind,
-            url: res.cover_letter.url ? absolute(res.cover_letter.url) : undefined,
-          },
-    coverLetterText: res.cover_letter_text ?? null,
-    usedMasterCv: res.used_master_cv ?? null,
-  };
+
+  if (res.status === 401 && session && !retried) {
+    const refreshed = await tryRefresh(session);
+    if (refreshed) return generateApplication(req, onEvent, true);
+    clearSession();
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("groundwork:unauthorized"));
+    }
+    throw new Error("Session expired. Please sign in again.");
+  }
+
+  if (!res.ok || !res.body) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      detail = body.detail ?? JSON.stringify(body);
+    } catch {
+      // keep statusText
+    }
+    throw new Error(detail);
+  }
+
+  await readSSE(res.body, (raw) => dispatchEvent(raw, onEvent));
 }

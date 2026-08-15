@@ -53,7 +53,6 @@ def test_signup_returns_tokens_and_onboards(monkeypatch):
     users: dict = {"u-1": {"app_metadata": {}}}
     _mock_fresh_client(monkeypatch, users)
     monkeypatch.setattr(sys.modules["auth"], "create_service_user", lambda: {"id": 7})
-    monkeypatch.setattr(sys.modules["auth"], "get_service_user", lambda uid: {"id": 7})
 
     result = signup("a@b.com", "password123")
     assert result["access_token"] == "acc-1"
@@ -66,7 +65,6 @@ def test_login_onboards_existing_user(monkeypatch):
     users: dict = {"u-1": {"app_metadata": {}}}
     _mock_fresh_client(monkeypatch, users)
     monkeypatch.setattr(sys.modules["auth"], "create_service_user", lambda: {"id": 9})
-    monkeypatch.setattr(sys.modules["auth"], "get_service_user", lambda uid: {"id": 9})
 
     result = login("a@b.com", "password123")
     assert result["service_user_id"] == 9
