@@ -36,6 +36,60 @@ and set a descriptive User-Agent. These are free public endpoints offered in goo
 
 # Done
 
+## 2026-08-16 — Fix: "Stuck at Generating…" — provider failover on quota exhaustion
+
+- Symptom: clicking Generate shows "Generating…" forever — the SSE stream emitted
+  `used_master_cv` then went silent (no `done`, no `error`).
+- Root cause: `GEMINI_API_KEY` is set (apps/api/.env), so Gemini became the primary
+  provider, and the **Gemini free tier was quota-exhausted** (429 "limit: 20/day",
+  verified live). `chat()` slept 45s and retried *the same dead provider* on 429,
+  with no failover — 3 concurrent parts × ~90s+ of futile retries read as "stuck".
+- Fix (apps/api/llm.py): `_endpoint()`/`_vision_endpoint()` refactored into
+  `_provider_chain()`/`_vision_provider_chain()` (Ollama → Gemini → OpenRouter →
+  Groq). New `_post_completion()` walks the chain: quota/rate (429/413) or timeout
+  on a non-last provider fails over immediately; only the *last* provider (Groq)
+  keeps the sleep-and-retry (its rolling per-minute TPM window actually recovers).
+  `chat()` and `vision_chat()` now share it. `_endpoint()` kept as the chain head
+  so `active_provider()` semantics and Settings readout are unchanged.
+- Tests: `test_chat_fails_over_to_next_provider_on_quota`,
+  `test_chat_raises_when_all_providers_exhausted`,
+  `test_provider_chain_orders_gemini_openrouter_groq` (test_llm.py).
+- Checks: pytest 37 pass (1 pre-existing ASD-STE100 failure untouched), ruff clean.
+- Verified end-to-end against the live server: generate now completes with
+  `resume` + `feedback` + `done` in ~4.5s (was hanging), via Groq fallback.
+  Repro users/CVs/auth cleaned up (service_users 20-23 removed).
+- Note: the fix makes the *fallback* work; the Gemini quota itself is a free-tier
+  daily cap. If both Gemini and Groq are exhausted, generation fails with a clear
+  error instead of hanging.
+
+## 2026-08-16 — Fix: "Model produced invalid LaTeX (no documentclass)" — splice master preamble
+
+- Symptom persisted after the hint-retry fix: resume generation still 502 —
+  "Model produced invalid LaTeX (no documentclass). Try again."
+- Root cause: the fine-tune prompt asks for keyword-level edits, so the model
+  occasionally returns body-only .tex (drops the whole preamble incl. documentclass).
+  The hint retry just burned another (rate-limited) LLM call and produced the same.
+- Fix: `_repair_missing_preamble` (apps/api/main.py) splices the grounded master
+  preamble back on deterministically — prepends the master's text through
+  `\begin{document}` (whose commands like \resumeItem the body already relies on),
+  and re-appends `\end{document}` if the body dropped it. No extra LLM call.
+- Tests: `test_repair_missing_preamble_splices_master_when_body_only`,
+  `test_repair_missing_preamble_passthrough_when_documentclass_present`,
+  `test_fine_tune_splices_master_preamble_when_documentclass_missing`.
+- Checks: pytest 34 pass (1 pre-existing ASD-STE100 failure untouched), ruff clean.
+
+## 2026-08-16 — Fix: "Model produced invalid LaTeX (no documentclass)" retry sent an identical prompt
+
+- Symptom: resume generation 502 — "Model produced invalid LaTeX (no documentclass).
+  Try again."
+- Root cause: `_fine_tune` retried the same `user` prompt with no hint when the model's
+  output lacked `\documentclass`, so the retry failed the same way.
+- Fix: `_fine_tune` (apps/api/main.py) appends "Your previous response was missing the
+  \documentclass declaration. Start with \documentclass{...}" to the retry prompt.
+- Test: `test_fine_tune_retry_hints_documentclass_when_missing` (fake first call returns
+  prose, second returns valid LaTeX; asserts the hint reached the second prompt).
+- Checks: pytest 32 pass (1 pre-existing ASD-STE100 failure untouched), ruff clean.
+
 ## 2026-08-16 — Free provider: Google AI Studio (Gemini) replaces paid OpenRouter
 
 - Root cause of the repeated 402s: the saved OpenRouter key put every generation
