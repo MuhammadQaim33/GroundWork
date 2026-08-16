@@ -23,8 +23,9 @@ export interface BragDoc {
 }
 
 export interface LlmSettings {
-  provider: "openrouter" | "groq" | "ollama";
+  provider: "ollama" | "gemini" | "openrouter" | "groq";
   openrouterKeySet: boolean;
+  geminiKeySet: boolean;
 }
 
 export interface JobAnswer {
@@ -70,8 +71,9 @@ interface ServerBrag {
 }
 
 interface ServerLlmSettings {
-  provider: "openrouter" | "groq" | "ollama";
+  provider: "ollama" | "gemini" | "openrouter" | "groq";
   openrouter_key_set: boolean;
+  gemini_key_set: boolean;
 }
 
 interface ServerFile {
@@ -239,7 +241,11 @@ export async function clearBragDoc(): Promise<void> {
 
 export async function getLlmSettings(): Promise<LlmSettings> {
   const row = await request<ServerLlmSettings>("/api/settings");
-  return { provider: row.provider, openrouterKeySet: row.openrouter_key_set };
+  return {
+    provider: row.provider,
+    openrouterKeySet: row.openrouter_key_set,
+    geminiKeySet: row.gemini_key_set,
+  };
 }
 
 export async function setOpenRouterKey(key: string): Promise<void> {
@@ -247,6 +253,14 @@ export async function setOpenRouterKey(key: string): Promise<void> {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ openrouter_api_key: key }),
+  });
+}
+
+export async function setGeminiKey(key: string): Promise<void> {
+  await request("/api/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gemini_api_key: key }),
   });
 }
 

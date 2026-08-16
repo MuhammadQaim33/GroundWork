@@ -308,8 +308,19 @@ export default function GeneratePage() {
       {feedback !== null && (
         <section className="rounded-lg border border-uber-line bg-background p-5">
           <h2 className="text-sm font-medium text-uber-black">Feedback</h2>
-          <div className="mt-3 whitespace-pre-wrap rounded-md border border-uber-line bg-white p-4 text-sm">
-            {feedback}
+          <div className="mt-3 rounded-md border border-uber-line bg-white p-4">
+            <ul className="space-y-2.5 text-sm text-uber-black">
+              {feedback
+                .split("\n")
+                .map((l) => l.trim())
+                .filter(Boolean)
+                .map((line, i) => (
+                  <li key={i} className="flex items-start gap-2.5">
+                    <span className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-uber-green" />
+                    <span className="flex-1">{line.replace(/^[-•*]\s*/, "")}</span>
+                  </li>
+                ))}
+            </ul>
           </div>
         </section>
       )}
@@ -322,18 +333,39 @@ function MatchRating({ rating }: { rating: number }) {
   const score = Math.max(0, Math.min(10, rating));
   const tone =
     score >= 8
-      ? { badge: "bg-uber-green", bar: "bg-uber-green", label: "Strong match" }
+      ? {
+          badge: "bg-uber-green",
+          bar: "bg-uber-green",
+          border: "border-uber-green",
+          soft: "bg-uber-green-soft",
+          text: "text-uber-green-dark",
+          label: "Strong match",
+        }
       : score >= 5
-        ? { badge: "bg-amber-500", bar: "bg-amber-500", label: "Partial match" }
-        : { badge: "bg-red-500", bar: "bg-red-500", label: "Weak match" };
+        ? {
+            badge: "bg-amber-500",
+            bar: "bg-amber-500",
+            border: "border-amber-400",
+            soft: "bg-amber-50",
+            text: "text-amber-700",
+            label: "Partial match",
+          }
+        : {
+            badge: "bg-red-500",
+            bar: "bg-red-500",
+            border: "border-red-400",
+            soft: "bg-red-50",
+            text: "text-red-700",
+            label: "Weak match",
+          };
   return (
-    <div className="flex items-center gap-4 rounded-md border border-uber-line bg-white p-4">
+    <div className={`flex items-center gap-4 rounded-xl border-2 p-5 ${tone.border} ${tone.soft}`}>
       <div
-        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-white ${tone.badge}`}
+        className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-white ${tone.badge} shadow-lg ring-4 ring-white`}
       >
         <svg
           viewBox="0 0 24 24"
-          className="h-6 w-6"
+          className="h-7 w-7"
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
@@ -347,16 +379,14 @@ function MatchRating({ rating }: { rating: number }) {
         </svg>
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex items-baseline justify-between gap-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-uber-gray">
-            Job match · {tone.label}
-          </p>
-          <p className="text-2xl font-semibold text-uber-black">
-            {score}
-            <span className="text-sm font-normal text-uber-gray">/10</span>
-          </p>
+        <p className={`text-xs font-semibold uppercase tracking-wider ${tone.text}`}>
+          Job match · {tone.label}
+        </p>
+        <div className="mt-1 flex items-baseline gap-1.5">
+          <span className={`text-5xl font-bold leading-none ${tone.text}`}>{score}</span>
+          <span className="text-base font-medium text-uber-gray">/ 10</span>
         </div>
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-uber-bg">
+        <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-black/10">
           <div
             className={`h-full rounded-full ${tone.bar}`}
             style={{ width: `${score * 10}%` }}

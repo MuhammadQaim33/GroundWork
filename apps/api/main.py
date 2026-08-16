@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from pathlib import Path
@@ -27,7 +28,14 @@ from store import (
     upload_brag,
     upload_cv,
 )
-from user_settings import get_links, get_openrouter_key, set_links, set_openrouter_key
+from user_settings import (
+    get_gemini_key,
+    get_links,
+    get_openrouter_key,
+    set_gemini_key,
+    set_links,
+    set_openrouter_key,
+)
 
 app = FastAPI(title="Groundwork Generator API")
 app.add_middleware(
@@ -143,11 +151,16 @@ def api_delete_brag(_sv: Annotated[dict, Depends(require_service_user)]):
 
 @app.get("/api/settings")
 def api_get_settings(_sv: Annotated[dict, Depends(require_service_user)]):
-    return {"provider": active_provider(), "openrouter_key_set": bool(get_openrouter_key())}
+    return {
+        "provider": active_provider(),
+        "openrouter_key_set": bool(get_openrouter_key()),
+        "gemini_key_set": bool(get_gemini_key()),
+    }
 
 
 class SettingsUpdate(BaseModel):
     openrouter_api_key: str = ""
+    gemini_api_key: str = ""
 
 
 class LinksUpdate(BaseModel):
@@ -157,6 +170,7 @@ class LinksUpdate(BaseModel):
 @app.put("/api/settings")
 def api_put_settings(req: SettingsUpdate, _sv: Annotated[dict, Depends(require_service_user)]):
     set_openrouter_key(req.openrouter_api_key)
+    set_gemini_key(req.gemini_api_key)
     return {"ok": True}
 
 
@@ -229,7 +243,7 @@ def _stream_error(exc: Exception) -> str:
     return f"Generation failed: {exc}"
 
 
-def _generate_stream(
+async def _generate_stream(
     req: GenerateRequest,
     jd: str,
     answers: list[Answer],
@@ -239,44 +253,75 @@ def _generate_stream(
     brag_text: str,
     master_tex: str,
 ):
-    """Emit each requested artifact as an SSE event; a failed part doesn't kill the rest."""
+    """Emit each requested artifact as an SSE event; a failed part doesn't kill the rest.
+
+    The resume, cover letter, and feedback branches are independent, so they run
+    concurrently (blocking LLM/compile work via to_thread) and each event is
+    emitted the moment its branch finishes.
+    """
     yield _sse("used_master_cv", {"used_master_cv": cv_name})
 
-    if "resume" in req.parts:
+    async def _run_resume() -> list[tuple[str, dict]]:
         try:
-            fine_tuned = _fine_tune(master_tex, brag_text, jd)
-            resume_pdf = _compile(fine_tuned, "custom-resume")
-            yield _sse(
-                "resume",
-                {"name": "custom-resume.pdf", "kind": "pdf", "url": f"/out/{resume_pdf.name}"},
-            )
+            resume_pdf = await asyncio.to_thread(_build_resume, master_tex, brag_text, jd)
+            return [
+                (
+                    "resume",
+                    {"name": "custom-resume.pdf", "kind": "pdf", "url": f"/out/{resume_pdf.name}"},
+                )
+            ]
         except Exception as exc:
-            yield _sse("error", {"part": "resume", "message": _stream_error(exc)})
+            return [("error", {"part": "resume", "message": _stream_error(exc)})]
 
-    if "cover_letter" in req.parts:
+    async def _run_cover_letter() -> list[tuple[str, dict]]:
         try:
-            letter_text = _cover_letter(jd, answers, cv_name, name, links)
-            yield _sse("cover_letter_text", {"text": letter_text})
+            letter_text = await asyncio.to_thread(
+                _cover_letter, jd, answers, cv_name, name, links
+            )
+            events: list[tuple[str, dict]] = [("cover_letter_text", {"text": letter_text})]
             if "text" in req.cover_letter_formats:
-                yield _sse(
-                    "cover_letter_txt",
-                    {"name": "cover-letter.txt", "kind": "text", "text": letter_text},
+                events.append(
+                    (
+                        "cover_letter_txt",
+                        {"name": "cover-letter.txt", "kind": "text", "text": letter_text},
+                    )
                 )
             if "pdf" in req.cover_letter_formats:
-                letter_pdf = _compile(_letter_to_tex(letter_text), "cover-letter")
-                yield _sse(
-                    "cover_letter_pdf",
-                    {"name": "cover-letter.pdf", "kind": "pdf", "url": f"/out/{letter_pdf.name}"},
+                letter_pdf = await asyncio.to_thread(
+                    _compile, _letter_to_tex(letter_text), "cover-letter"
                 )
+                events.append(
+                    (
+                        "cover_letter_pdf",
+                        {
+                            "name": "cover-letter.pdf",
+                            "kind": "pdf",
+                            "url": f"/out/{letter_pdf.name}",
+                        },
+                    )
+                )
+            return events
         except Exception as exc:
-            yield _sse("error", {"part": "cover_letter", "message": _stream_error(exc)})
+            return [("error", {"part": "cover_letter", "message": _stream_error(exc)})]
 
-    # feedback is non-optional — always generated
-    try:
-        rating, feedback_text = _feedback(jd, master_tex, brag_text)
-        yield _sse("feedback", {"rating": rating, "text": feedback_text})
-    except Exception as exc:
-            yield _sse("error", {"part": "feedback", "message": _stream_error(exc)})
+    async def _run_feedback() -> list[tuple[str, dict]]:
+        # feedback is non-optional — always generated
+        try:
+            rating, feedback_text = await asyncio.to_thread(_feedback, jd, master_tex, brag_text)
+            return [("feedback", {"rating": rating, "text": feedback_text})]
+        except Exception as exc:
+            return [("error", {"part": "feedback", "message": _stream_error(exc)})]
+
+    tasks: list[asyncio.Task] = []
+    if "resume" in req.parts:
+        tasks.append(asyncio.create_task(_run_resume()))
+    if "cover_letter" in req.parts:
+        tasks.append(asyncio.create_task(_run_cover_letter()))
+    tasks.append(asyncio.create_task(_run_feedback()))
+
+    for task in asyncio.as_completed(tasks):
+        for event, data in await task:
+            yield _sse(event, data)
 
     yield _sse("done", {})
 
@@ -342,7 +387,7 @@ SCREENSHOT_SYSTEM = (
     "candidate's voice, grounded ONLY in the candidate's resume and brag document below — "
     "never invent experience, skills, or metrics. Keep answers to 1-4 specific, honest "
     "sentences. "
-    "Reply with ONLY JSON: an array of objects, each {\"question\": \"...\", \"answer\": \"...\"}. "
+    'Reply with ONLY JSON: an array of objects, each {"question": "...", "answer": "..."}. '
     "No markdown fences, no commentary."
 )
 
@@ -424,7 +469,9 @@ MAX_OUT_TOKENS = 5000
 def _fit_max_tokens(system: str, user: str, floor: int = 800) -> int:
     est_input = (len(system) + len(user)) // 4
     if active_provider() != "groq":
-        return max(floor, MAX_OUT_TOKENS)
+        # No TPM ceiling, but OpenRouter reserves `max_tokens` worth of credits per
+        # request — request only what the task actually needs, not the 5000 cap.
+        return floor
     max_out = max(floor, min(MAX_OUT_TOKENS, TPM_BUDGET - est_input))
     if est_input + max_out > TPM_BUDGET + 500:
         raise HTTPException(
@@ -441,11 +488,12 @@ FEEDBACK_SYSTEM = (
     "Base your assessment ONLY on the candidate's resume and brag document below — "
     "never invent skills, experience, or metrics. "
     "Reply with ONLY JSON with exactly two fields: "
-    "\"rating\": an integer 1-10 rating how well the candidate matches this job, and "
+    '"rating": an integer 1-10 rating how well the candidate matches this job, and '
     "\"feedback\": a concise bullet-point list (each line starting with '- '), at most "
     "6 bullets, covering strengths that fit the job, gaps or weak spots relative to it, "
     "and one practical piece of advice for this application or interview. "
     "Be specific and honest. No preamble, no markdown fences."
+    "Be pragmatic and realistic with the rating."
 )
 
 
@@ -458,31 +506,55 @@ def _feedback_prompt(job_description: str, master_tex: str, brag_text: str) -> t
     return FEEDBACK_SYSTEM, user
 
 
-def _parse_feedback(raw: str) -> tuple[int | None, str]:
-    """Parse the model's JSON into (rating 1-10, feedback text); fall back on failure."""
+def _strip_json_fence(raw: str) -> str:
     text = raw.strip()
     if text.startswith("```"):
         text = "\n".join(text.splitlines()[1:])
         if text.rstrip().endswith("```"):
             text = "\n".join(text.splitlines()[:-1])
-        text = text.strip()
+    return text.strip()
+
+
+def _first_json_object(text: str) -> dict | None:
+    """Pull the first {...} block out of the model output, ignoring prose around it."""
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end <= start:
+        return None
     try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            fb = data.get("feedback")
-            if isinstance(fb, str) and fb.strip():
-                rating = data.get("rating")
-                if isinstance(rating, str):
-                    rating = rating.strip()
-                try:
-                    rating = int(float(rating))
-                except (TypeError, ValueError):
-                    rating = None
-                rating = max(1, min(10, rating)) if isinstance(rating, int) else None
-                return rating, fb.strip()
+        data = json.loads(text[start : end + 1])
     except (json.JSONDecodeError, TypeError):
-        pass
-    return None, raw.strip()
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _clamp_rating(rating: object) -> int | None:
+    if isinstance(rating, str):
+        rating = rating.strip()
+    try:
+        rating = int(float(rating))
+    except (TypeError, ValueError):
+        return None
+    return max(1, min(10, rating))
+
+
+def _parse_feedback(raw: str) -> tuple[int | None, str]:
+    """Parse the model's JSON into (rating 1-10, feedback text); fall back on failure."""
+    text = _strip_json_fence(raw)
+    data = _first_json_object(text)
+    if data is not None:
+        fb = data.get("feedback")
+        if isinstance(fb, str) and fb.strip():
+            return _clamp_rating(data.get("rating")), fb.strip()
+        if isinstance(fb, list):
+            lines = [str(x).strip() for x in fb if str(x).strip()]
+            if lines:
+                return _clamp_rating(data.get("rating")), "\n".join(lines)
+    return _clamp_rating(_rating_in_text(text)), text
+
+
+def _rating_in_text(text: str) -> object:
+    m = re.search(r'"rating"\s*:\s*"?(\d{1,2})"?', text)
+    return m.group(1) if m else None
 
 
 def _feedback(job_description: str, master_tex: str, brag_text: str) -> tuple[int | None, str]:
@@ -519,36 +591,90 @@ def _pick_cv(cvs: list[dict], job_description: str) -> dict:
 
 
 FINE_TUNE_SYSTEM = (
-    "You are a resume editor. Tailor the provided LaTeX resume to a job description, using "
-    "facts from the brag document when they strengthen the fit. "
-    "NEVER invent experience, skills, or metrics that appear in neither the resume nor the "
+    "You are a resume editor. Your only goal: maximize the chance this resume gets an "
+    "interview call for the job description. "
+    "KEEP the document structure and almost all existing content intact — keep every section, "
+    "bullet, and metric exactly as written; never delete, condense, summarize, or rewrite a line. "
+    "Make only minimal keyword-level edits to better match the job description: "
+    "surface relevant keywords that are already in the resume (matching the job's terminology), "
+    "and swap a generic phrase for the job's keyword when it is an honest fit (e.g. "
+    "'built services' -> 'designed REST APIs'). You may add a skill ONLY if it appears in the "
     "brag document. "
-    "Ensure that metrics are preserved"
-    "Don't strip a line if you feel like its already fine and is attractive to the recruiter"
-    "Keep the document structure and keep the LaTeX valid. "
+    "NEVER invent experience, skills, or metrics that appear in neither the resume nor the "
+    "brag document. Every number must appear EXACTLY as written in the source. "
+    "Escape special characters in text (use \\& not &, \\% not %, \\_ not _, \\# not #). "
+    "Keep the LaTeX valid. "
     "Respond with ONLY the .tex source code — no markdown fences, no commentary."
 )
 
 
-def _fine_tune(master_tex: str, brag_text: str, job_description: str) -> str:
+def _extract_latex_document(text: str) -> str:
+    """Cut any prose the model added before \\documentclass or after \\end{document}."""
+    m = re.search(r"\\documentclass", text, re.IGNORECASE)
+    if not m:
+        return text
+    body = text[m.start() :]
+    end = re.search(r"\\end\{document\}", body, re.IGNORECASE)
+    if end:
+        body = body[: end.end()]
+    return body
+
+
+def _fine_tune(
+    master_tex: str,
+    brag_text: str,
+    job_description: str,
+    error_hint: str = "",
+) -> str:
     user = (
         f"JOB DESCRIPTION:\n{job_description}\n\n"
         + (f"BRAG DOCUMENT:\n{brag_text}\n\n" if brag_text else "")
         + f"MASTER RESUME (.tex):\n{master_tex}"
-        
     )
+    if error_hint:
+        user += (
+            "\n\nThe previous compile attempt failed with:\n"
+            f"{error_hint[:1200]}\n\n"
+            "Fix this LaTeX error. Output the complete corrected .tex source."
+        )
     max_tokens = _fit_max_tokens(FINE_TUNE_SYSTEM, user, floor=3000)
-    edited = chat(FINE_TUNE_SYSTEM, user, temperature=0.3, max_tokens=max_tokens).strip()
-    if edited.startswith("```"):
-        edited = "\n".join(edited.splitlines()[1:])
-        if edited.rstrip().endswith("```"):
-            edited = "\n".join(edited.splitlines()[:-1])
+    edited = _clean_model_latex(
+        chat(FINE_TUNE_SYSTEM, user, temperature=0.3, max_tokens=max_tokens).strip()
+    )
     # ponytail: LLM LaTeX may not compile — one retry, then fail loud. No silent fallback.
     if "documentclass" not in edited.lower():
-        edited = chat(FINE_TUNE_SYSTEM, user, temperature=0.3, max_tokens=max_tokens).strip()
+        edited = _clean_model_latex(
+            chat(FINE_TUNE_SYSTEM, user, temperature=0.3, max_tokens=max_tokens).strip()
+        )
         if "documentclass" not in edited.lower():
             raise HTTPException(502, "Model produced invalid LaTeX (no documentclass). Try again.")
     return edited
+
+
+def _clean_model_latex(text: str) -> str:
+    if text.startswith("```"):
+        text = "\n".join(text.splitlines()[1:])
+        if text.rstrip().endswith("```"):
+            text = "\n".join(text.splitlines()[:-1])
+    return _extract_latex_document(text.strip())
+
+
+def _build_resume(master_tex: str, brag_text: str, job_description: str) -> Path:
+    """Fine-tune + compile the resume; regenerate once if the LLM's LaTeX fails to compile.
+
+    LLM LaTeX is unreliable, so a failed compile earns one re-fine-tune with the error
+    tail fed back as a hint, then fails loud (ponytail: no silent fallback).
+    """
+    error_hint = ""
+    last_error: Exception | None = None
+    for _ in range(2):
+        edited = _fine_tune(master_tex, brag_text, job_description, error_hint)
+        try:
+            return _compile(edited, "custom-resume")
+        except Exception as exc:
+            last_error = exc
+            error_hint = str(exc)
+    raise last_error if last_error else RuntimeError("resume generation failed")
 
 
 def _cover_letter(
@@ -588,6 +714,7 @@ def _cover_letter_prompt(
         "Short sentences, one idea per sentence, simple "
         "unambiguous vocabulary. Ground every claim in the job description and the candidate's "
         "own answers; never invent experience or numbers. "
+        "Optimize for recruiter attractiveness and recruiter ease to read"
     )
     if name:
         system += (

@@ -36,6 +36,120 @@ and set a descriptive User-Agent. These are free public endpoints offered in goo
 
 # Done
 
+## 2026-08-16 — Free provider: Google AI Studio (Gemini) replaces paid OpenRouter
+
+- Root cause of the repeated 402s: the saved OpenRouter key put every generation
+  (and screenshot questions) on the **paid** `google/gemini-2.5-flash`; Gemini has
+  no `:free` variant on OpenRouter, so credits drained. The same model is **free**
+  on Google AI Studio's OpenAI-compatible endpoint — swapped in as the top default.
+- `apps/api/llm.py`: new `GEMINI_BASE_URL = https://generativelanguage.googleapis.com/v1beta/openai`.
+  `_endpoint()` precedence is now Ollama → **Gemini** (key set) → OpenRouter (key set)
+  → Groq. New `_vision_endpoint()` (Gemini wins for screenshot questions, OpenRouter
+  BYOK fallback, clear error otherwise); `vision_chat` uses it. `active_provider()`
+  gained `"gemini"`. No credit reservation + huge free TPM = the 402 class of bugs is gone.
+- `apps/api/config.py`: `gemini_api_key` / `gemini_model` / `gemini_vision_model`
+  (defaults `gemini-3.6-flash`); documented in `.env.example`. `GEMINI_API_KEY` set in `.env`.
+  Discovery during verification: `gemini-2.5-flash` is **no longer available to new users**
+  (404); live-tested `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.1-flash-lite` all 200
+  on the free key — picked `gemini-3.6-flash` (current docs default). Verified a real
+  `chat()` round-trip returns content (small `max_tokens` can be eaten by the model's
+  thinking budget — real budgets ≥800 are fine).
+- Migration `20260816000000_service_users_gemini_key.sql` **pushed** ✓:
+  `service_users.gemini_api_key text not null default ''` (verified column live).
+  `store.py`: `set_service_user_gemini_key`; `user_settings.py`: `get/set_gemini_key`
+  (same DB-first, env-fallback pattern as OpenRouter).
+- `apps/api/main.py`: `/api/settings` returns `gemini_key_set`; `SettingsUpdate` accepts
+  `gemini_api_key` and PUT saves it. `_fit_max_tokens` untouched (non-Groq → floor already).
+- `apps/dashboard`: `lib/api.ts` provider union + `geminiKeySet` + `setGeminiKey`;
+  `/settings` gets a "Gemini API key (free, from AI Studio)" field + save button, and
+  the provider readout shows "Gemini (free)" when active.
+- Tests: `test_llm.py` — gemini precedence, gemini-outranks-openrouter, vision
+  endpoint preference + no-key error; existing openrouter/groq tests updated to
+  neutralize the env gemini key. 31 pass (1 pre-existing ASD-STE100 failure
+  untouched); `ruff` clean for changed files; `npm run lint` ✓; `npm run build` ✓.
+- Note: user's saved OpenRouter key stays in the DB (dormant fallback); clear the
+  Gemini key in Settings to fall back to it.
+
+## 2026-08-16 — Fix: OpenRouter 402 "can only afford N tokens" (credit reservations)
+
+- Symptom: every LLM call failed with `LLM provider error (402)` — "You requested up
+  to 5000 tokens, but can only afford 3552".
+- Root cause: OpenRouter reserves/bills the full `max_tokens` a request asks for. On
+  non-Groq providers `_fit_max_tokens` returned the 5000 cap (`max(floor, MAX_OUT_TOKENS)`)
+  for every call, so fine-tune AND feedback each reserved 5000 tokens — exceeding the
+  account's remaining credit in one generate.
+- Fix: for non-Groq providers `_fit_max_tokens` now returns just the task `floor`
+  (fine-tune 3000, feedback 800); cover letter already hardcoded 1500. Total per
+  generate reservation drops ~15K → ~5K. Groq TPM-budget path unchanged.
+- Test: `test_fit_max_tokens_non_groq_returns_floor_not_ceiling` (27 pass; 1
+  pre-existing ASD-STE100 failure untouched). `ruff` ✓.
+
+## 2026-08-16 — Fix: LLM resume with bare `&` broke LaTeX compile
+
+- Symptom: resume generation 502 — "tectonic failed for custom-resume-*: Forbidden
+  control sequence found while scanning use of \check@nocorr@".
+- Root cause: the model emitted a bare `&` inside `\textbf{...}` in resume body text
+  (e.g. `{AI & Full-Stack Engineering Lead}`, `{... Job Search & Interview System}`).
+  `\textbf{...}` expands to `\text@command{\bfseries}{...}`; the argument's braces are
+  stripped during expansion, so the `&` lands at brace level 0 inside the `tabular*`
+  cell and prematurely terminates it → runaway argument. Templates must use `\&`.
+- Fixes (apps/api):
+  - `FINE_TUNE_SYSTEM` now instructs "Escape special characters in text (use \& not &,
+    \% not %, \_ not _, \# not #)".
+  - `_fine_tune(master_tex, brag_text, jd, error_hint="")` — when a compile fails, the
+    error tail is appended to the next prompt ("Fix this LaTeX error...").
+  - New `_build_resume` — fine-tune + compile loop: a failed compile earns one
+    re-fine-tune (with the error tail as a hint), then fails loud. Wired into the
+    resume branch of `_generate_stream` (replaces the raw fine-tune→compile pair).
+- Verified: escaping the body `&`s in the exact failing `custom-resume-5be69d94.tex`
+  compiles to a valid 41KB PDF.
+- Tests: `test_build_resume_regenerates_once_on_compile_failure` +
+  `test_fine_tune_appends_compile_error_hint` (26 pass; 1 pre-existing ASD-STE100
+  failure untouched). `ruff` ✓.
+
+## 2026-08-16 — Generate speed: fast model default, parallel artifacts, keyword-only fine-tune
+
+- **Faster model.** Default OpenRouter model `meta-llama/llama-3.3-70b-instruct` →
+  `google/gemini-2.5-flash` (`config.py`); the 70B rewrite was the dominant cost.
+  Override stays available via `OPENROUTER_MODEL`.
+- **Parallel artifacts.** `_generate_stream` is now an async generator: resume, cover
+  letter, and feedback run concurrently (`asyncio.create_task` + `asyncio.as_completed`,
+  blocking LLM/compile work via `asyncio.to_thread` — which also keeps the per-user
+  contextvar propagation intact). Each artifact is still emitted the instant its branch
+  finishes; per-part failure isolation unchanged. SSE event order is now completion
+  order, so the stream tests assert event *sets* instead of order (frontend already
+  dispatches by type, order-independent).
+- **Keyword-only fine-tune.** `FINE_TUNE_SYSTEM` rewritten: preserve every section,
+  bullet, and metric; make only minimal keyword-level edits to match the JD's
+  terminology, add a skill only if it's in the brag doc, no invented experience/metrics.
+  Also fixed the prompt's missing-space bug ("preservedDon't", "recruiterKeep").
+- Checks: pytest 24 ✓ (1 pre-existing ASD-STE100 failure, untouched), ruff ✓,
+  `npm run lint` ✓, `npm run build` ✓. No schema change.
+
+## 2026-08-15 — Feedback: robust JSON parse + prominent rating & formatted list
+
+- Raw-JSON bug: the model sometimes wraps prose around the JSON, so `_parse_feedback`
+  fell back to the raw text (shown verbatim). Now `_first_json_object` pulls the first
+  `{...}` block out of the output, `_clamp_rating` clamps 1-10, feedback accepts string or
+  list-of-strings, and a `"rating": N` regex fallback covers unparseable output. Added
+  prose-wrapped + feedback-as-array test cases (23 pass).
+- UI: `MatchRating` redesigned to stand out — colored border + soft background card,
+  larger 56px logo badge with white ring, big `text-5xl` score, thicker progress bar
+  (green/amber/red by score). Feedback card now renders a proper bullet list with green
+  dot markers instead of raw pre text.
+
+## 2026-08-15 — Fix: model prose before \\documentclass broke resume compile
+
+- Symptom: resume generation 502 — "LaTeX Error: Missing \begin{document}"; the model
+  prepended "Here is the modified LaTeX resume tailored to the job description:" to its
+  output, so the prose landed at the top of the .tex (fence-stripping only handled ```).
+- Fix: `_extract_latex_document` cuts everything before the first `\documentclass` and
+  after `\end{document}` (case-insensitive); `_clean_model_latex` applies fence-stripping
+  then extraction, used in both `_fine_tune` attempts (retry path included).
+- Tests: `_extract_latex_document` prose/trailing-commentary drop + no-documentclass
+  passthrough + `_clean_model_latex` fences+prose (23 pass; 2 pre-existing failures).
+  `ruff` clean for new code.
+
 ## 2026-08-15 — Feedback non-optional + 1-10 job-match rating with UI
 
 - **Feedback is always generated.** The Feedback toggle is gone from `/generate`; the

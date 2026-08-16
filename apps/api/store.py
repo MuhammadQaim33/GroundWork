@@ -147,5 +147,9 @@ def set_service_user_openrouter_key(user_id: int, key: str) -> None:
     client().table("service_users").update({"openrouter_api_key": key}).eq("id", user_id).execute()
 
 
+def set_service_user_gemini_key(user_id: int, key: str) -> None:
+    client().table("service_users").update({"gemini_api_key": key}).eq("id", user_id).execute()
+
+
 def set_service_user_links(user_id: int, links: list[str]) -> None:
     client().table("service_users").update({"links": links}).eq("id", user_id).execute()

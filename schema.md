@@ -39,6 +39,7 @@ Supabase JWT.
 | `id` | bigint identity PK | |
 | `api_key` | text not null unique | |
 | `openrouter_api_key` | text not null default '' | BYOK key, stored server-side |
+| `gemini_api_key` | text not null default '' | Google AI Studio (free) key, stored server-side; wins over OpenRouter when set |
 | `links` | text[] | nullable, no default (null and `[]` both mean "none") |
 | `created_at` | timestamptz not null default now() | |
 
@@ -77,6 +78,9 @@ traces, autofill_sessions, interview_preps, mock_sessions, analytics_snapshots, 
 
 ## Changelog
 
+- **2026-08-16** — `service_users.gemini_api_key text not null default ''` added
+  (migration `20260816000000`). Free Google AI Studio key; provider precedence when set:
+  Gemini → OpenRouter → Groq.
 - **2026-08-15** — `module_brag_docs.summary` no longer written/read (full brag doc sent to the
   model instead); column retained for now, marked unused.
 - **2026-08-13** — `service_users.links text[]` added (migration `20260813200000`), then made

@@ -12,6 +12,7 @@ import {
   listMasterCVs,
   removeMasterCV,
   setBragDoc,
+  setGeminiKey,
   setLinks,
   setOpenRouterKey,
   setPreferredMasterCV,
@@ -32,6 +33,7 @@ export default function SettingsPage() {
   const [llmError, setLlmError] = useState<string | null>(null);
   const [llmSaved, setLlmSaved] = useState(false);
   const [keyInput, setKeyInput] = useState("");
+  const [geminiInput, setGeminiInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [linkRows, setLinkRows] = useState<LinkRow[]>([]);
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -147,6 +149,23 @@ export default function SettingsPage() {
     }
   }
 
+  async function onSaveGeminiKey() {
+    if (!geminiInput.trim()) return;
+    setLlmError(null);
+    setLlmSaved(false);
+    setBusy(true);
+    try {
+      await setGeminiKey(geminiInput.trim());
+      setGeminiInput("");
+      setLlm(await getLlmSettings());
+      setLlmSaved(true);
+    } catch (err) {
+      setLlmError(err instanceof Error ? err.message : "Save failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <AuthGuard>
     <div className="flex flex-col gap-6">
@@ -162,10 +181,31 @@ export default function SettingsPage() {
         <div>
           <h2 className="text-sm font-medium text-uber-black">AI provider</h2>
           <p className="mt-0.5 text-xs text-uber-gray">
-            Generations run on the free Groq tier by default. For more accurate results,
-            bring your own OpenRouter API key — it unlocks bigger, smarter models with no
-            free-tier token limits. Your key is stored server-side and never shown again.
+            Generations run on the free Groq tier by default. Adding a free Google AI
+            Studio (Gemini) key upgrades both generation and screenshot questions to
+            Gemini with no credit costs; your OpenRouter key is the paid fallback. Keys
+            are stored server-side and never shown again.
           </p>
+        </div>
+
+        <div className="mt-4 flex items-center gap-2">
+          <input
+            type="password"
+            value={geminiInput}
+            onChange={(e) => setGeminiInput(e.target.value)}
+            placeholder={
+              llm?.geminiKeySet ? "Replace saved Gemini key" : "Gemini API key (free, from AI Studio)"
+            }
+            className="w-full max-w-sm rounded-md border border-uber-line px-3 py-1.5 text-sm text-uber-black outline-none focus:border-uber-green"
+          />
+          <button
+            type="button"
+            onClick={onSaveGeminiKey}
+            disabled={busy || !geminiInput.trim()}
+            className="rounded-md bg-uber-black px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-uber-green disabled:opacity-50"
+          >
+            Save Gemini key
+          </button>
         </div>
 
         <div className="mt-4 flex items-center gap-2">
@@ -184,7 +224,7 @@ export default function SettingsPage() {
             disabled={busy || !keyInput.trim()}
             className="rounded-md bg-uber-black px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-uber-green disabled:opacity-50"
           >
-            Save key
+            Save OpenRouter key
           </button>
         </div>
 
@@ -193,11 +233,13 @@ export default function SettingsPage() {
         {loaded && llm && (
           <p className="mt-3 text-xs text-uber-gray">
             Active provider:{" "}
-            {llm.provider === "openrouter"
-              ? "OpenRouter (your key)"
-              : llm.provider === "ollama"
-                ? "Ollama (local)"
-                : "Groq (free fallback)"}
+            {llm.provider === "gemini"
+              ? "Gemini (free)"
+              : llm.provider === "openrouter"
+                ? "OpenRouter (your key)"
+                : llm.provider === "ollama"
+                  ? "Ollama (local)"
+                  : "Groq (free fallback)"}
           </p>
         )}
       </section>

@@ -6,15 +6,22 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from fastapi import HTTPException  # noqa: E402
+
 from main import (  # noqa: E402
     FINE_TUNE_SYSTEM,
     Answer,
     GenerateRequest,
+    _build_resume,
     _clamp,
     _clamp_answers,
     _clamp_links,
+    _clean_model_latex,
     _cover_letter_prompt,
+    _extract_latex_document,
     _feedback_prompt,
+    _fine_tune,
+    _fit_max_tokens,
     _generate_stream,
     _parse_feedback,
     _parse_question_answers,
@@ -73,11 +80,88 @@ def test_cover_letter_prompt_without_name_or_links_keeps_placeholder() -> None:
     assert "CANDIDATE LINKS" not in system
 
 
-def test_fine_tune_prompt_never_trims_content_or_metrics() -> None:
+def test_extract_latex_document_drops_prose_and_trailing_commentary() -> None:
+    raw = (
+        "Here is the modified LaTeX resume tailored to the job description:\n"
+        "\\documentclass{article}\n"
+        "\\begin{document}\n"
+        "\\noindent Hi\n"
+        "\\end{document}\n"
+        "Hope this helps!"
+    )
+    out = _extract_latex_document(raw)
+    assert out.startswith("\\documentclass{article}")
+    assert out.endswith("\\end{document}")
+    assert "Here is the modified" not in out
+    assert "Hope this helps" not in out
+    assert "\\begin{document}" in out
+
+
+def test_extract_latex_document_returns_input_without_documentclass() -> None:
+    assert _extract_latex_document("just prose") == "just prose"
+
+
+def test_clean_model_latex_strips_fences_and_prose() -> None:
+    out = _clean_model_latex(
+        "```latex\nHere is my resume:\n\\documentclass{article}\n"
+        "\\begin{document}x\\end{document}\n```"
+    )
+    assert out.startswith("\\documentclass{article}")
+    assert out.endswith("\\end{document}")
+    assert "```" not in out
+    assert "Here is my resume" not in out
+
+
+def test_fine_tune_prompt_keyword_only_edits() -> None:
     lower = FINE_TUNE_SYSTEM.lower()
-    assert "never delete, condense, summarize, or shorten anything" in lower
+    assert "never delete, condense, summarize, or rewrite a line" in lower
     assert "exactly as written" in lower
-    assert "at least as detailed as the master" in lower
+    assert "keyword-level edits" in lower
+    assert "interview call" in lower
+    assert "never invent" in lower
+    assert "escape special characters" in lower
+
+
+def test_fit_max_tokens_non_groq_returns_floor_not_ceiling(monkeypatch) -> None:
+    monkeypatch.setattr("main.active_provider", lambda: "openrouter")
+    assert _fit_max_tokens("system", "user", floor=800) == 800
+    assert _fit_max_tokens("system", "user", floor=3000) == 3000
+
+
+def test_fine_tune_appends_compile_error_hint(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_chat(system, user, temperature, max_tokens):
+        captured["user"] = user
+        return "\\documentclass{article}\n\\begin{document}x\n\\end{document}"
+
+    monkeypatch.setattr("main.chat", fake_chat)
+    monkeypatch.setattr("main._fit_max_tokens", lambda *a, **k: 3000)
+    _fine_tune("master", "brag", "JD", error_hint="Forbidden control sequence")
+    assert "Forbidden control sequence" in captured["user"]
+    assert "previous compile attempt failed" in captured["user"].lower()
+    assert "Fix this LaTeX error" in captured["user"]
+
+
+def test_build_resume_regenerates_once_on_compile_failure(monkeypatch) -> None:
+    calls = {"fine_tune": 0, "compile": 0}
+
+    def fake_fine_tune(master, brag, jd, error_hint=""):
+        calls["fine_tune"] += 1
+        return f"tex-{calls['fine_tune']}"
+
+    def fake_compile(tex, base):
+        calls["compile"] += 1
+        if calls["compile"] == 1:
+            raise HTTPException(502, "LaTeX compile failed. broken")
+        return Path("custom-resume.pdf")
+
+    monkeypatch.setattr("main._fine_tune", fake_fine_tune)
+    monkeypatch.setattr("main._compile", fake_compile)
+    pdf = _build_resume("master", "brag", "JD")
+    assert pdf == Path("custom-resume.pdf")
+    assert calls["fine_tune"] == 2
+    assert calls["compile"] == 2
 
 
 def test_feedback_prompt_grounded_in_resume_and_brag_and_bullets() -> None:
@@ -101,6 +185,16 @@ def test_parse_feedback_returns_rating_and_text() -> None:
     rating, text = _parse_feedback('```json\n{"rating": "10", "feedback": "- great"}\n```')
     assert rating == 10
     assert text == "- great"
+
+    rating, text = _parse_feedback(
+        'Here is the feedback:\n{"rating": 9, "feedback": "- matches well"}'
+    )
+    assert rating == 9
+    assert text == "- matches well"
+
+    rating, text = _parse_feedback('{"rating": 6, "feedback": ["- a", "- b"]}')
+    assert rating == 6
+    assert text == "- a\n- b"
 
     rating, _ = _parse_feedback('{"rating": 99, "feedback": "- way too high"}')
     assert rating == 10
@@ -126,7 +220,18 @@ def _parse_sse(stream: str) -> list[tuple[str, dict]]:
     return events
 
 
-def test_generate_stream_emits_each_part_in_order(monkeypatch) -> None:
+async def _collect_sse(ag) -> str:
+    return "".join([chunk async for chunk in ag])
+
+
+def _sse_by_event(events: list[tuple[str, dict]]) -> dict[str, list[dict]]:
+    by: dict[str, list[dict]] = {}
+    for event, data in events:
+        by.setdefault(event, []).append(data)
+    return by
+
+
+async def test_generate_stream_emits_each_expected_artifact(monkeypatch) -> None:
     monkeypatch.setattr("main._fine_tune", lambda *a, **k: "\\documentclass{article}")
     monkeypatch.setattr("main._compile", lambda *a, **k: Path("custom-resume.pdf"))
     monkeypatch.setattr("main._cover_letter", lambda *a, **k: "Dear team,")
@@ -136,10 +241,10 @@ def test_generate_stream_emits_each_part_in_order(monkeypatch) -> None:
         cover_letter_formats=["pdf", "text"],
         parts=["resume", "cover_letter"],
     )
-    events = _parse_sse(
-        "".join(_generate_stream(req, "JD", [], "cv.tex", "Jane", [], "brag", "tex"))
-    )
-    assert [e for e, _ in events] == [
+    stream = _generate_stream(req, "JD", [], "cv.tex", "Jane", [], "brag", "tex")
+    events = _parse_sse(await _collect_sse(stream))
+    by = _sse_by_event(events)
+    assert set(by) == {
         "used_master_cv",
         "resume",
         "cover_letter_text",
@@ -147,32 +252,31 @@ def test_generate_stream_emits_each_part_in_order(monkeypatch) -> None:
         "cover_letter_pdf",
         "feedback",
         "done",
-    ]
-    assert events[0][1] == {"used_master_cv": "cv.tex"}
-    assert events[3][1]["kind"] == "text"
-    assert "Dear team," in events[3][1]["text"]
-    assert events[5][1] == {"rating": 8, "text": "- strong fit"}
+    }
+    assert by["used_master_cv"][0] == {"used_master_cv": "cv.tex"}
+    assert by["cover_letter_txt"][0]["kind"] == "text"
+    assert "Dear team," in by["cover_letter_txt"][0]["text"]
+    assert by["feedback"][0] == {"rating": 8, "text": "- strong fit"}
 
 
-def test_generate_stream_always_emits_feedback_even_when_not_requested(monkeypatch) -> None:
+async def test_generate_stream_always_emits_feedback_even_when_not_requested(monkeypatch) -> None:
     monkeypatch.setattr("main._cover_letter", lambda *a, **k: "Dear team,")
     monkeypatch.setattr("main._feedback", lambda *a, **k: (6, "- ok"))
     req = GenerateRequest(
         job_description="JD", cover_letter_formats=["text"], parts=["cover_letter"]
     )
-    events = _parse_sse(
-        "".join(_generate_stream(req, "JD", [], "cv.tex", "", [], "", ""))
-    )
-    assert [e for e, _ in events] == [
+    stream = _generate_stream(req, "JD", [], "cv.tex", "", [], "", "")
+    events = _parse_sse(await _collect_sse(stream))
+    assert set(_sse_by_event(events)) == {
         "used_master_cv",
         "cover_letter_text",
         "cover_letter_txt",
         "feedback",
         "done",
-    ]
+    }
 
 
-def test_generate_stream_partial_failure_isolates_the_part(monkeypatch) -> None:
+async def test_generate_stream_partial_failure_isolates_the_part(monkeypatch) -> None:
     def boom(*a, **k):
         raise RuntimeError("model down")
 
@@ -183,19 +287,19 @@ def test_generate_stream_partial_failure_isolates_the_part(monkeypatch) -> None:
     req = GenerateRequest(
         job_description="JD", cover_letter_formats=["text"], parts=["resume", "cover_letter"]
     )
-    events = _parse_sse(
-        "".join(_generate_stream(req, "JD", [], "cv.tex", "", [], "", ""))
-    )
-    assert [e for e, _ in events] == [
+    stream = _generate_stream(req, "JD", [], "cv.tex", "", [], "", "")
+    events = _parse_sse(await _collect_sse(stream))
+    by = _sse_by_event(events)
+    assert set(by) == {
         "used_master_cv",
         "error",
         "cover_letter_text",
         "cover_letter_txt",
         "feedback",
         "done",
-    ]
-    assert events[1][1]["part"] == "resume"
-    assert "model down" in events[1][1]["message"]
+    }
+    assert by["error"][0]["part"] == "resume"
+    assert "model down" in by["error"][0]["message"]
 
 
 def test_screenshot_questions_prompt_grounded_in_resume_and_brag() -> None:
