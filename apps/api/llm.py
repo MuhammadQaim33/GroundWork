@@ -22,6 +22,7 @@ import base64  # encodes binary image data into text form for transport
 import time
 
 import httpx  # the HTTP client library (sends web requests)
+from fastapi import HTTPException
 
 from config import settings
 from user_settings import get_gemini_key, get_openrouter_key
@@ -257,3 +258,42 @@ def _vision_provider_chain() -> list[tuple[str, str, dict[str, str]]]:
 def _vision_endpoint() -> tuple[str, str, dict[str, str]]:
     """The PRIMARY vision provider — first item of the vision chain."""
     return _vision_provider_chain()[0]
+
+
+# ============================================================================
+# Token-budget math for the Groq free tier.
+#
+# Groq's free llama-3.3-70b model is capped at 12,000 "tokens per minute"
+# (roughly word-parts). A request counts its INPUT length + the max_tokens we
+# ask for as OUTPUT against that rolling budget. So we compute how many output
+# tokens we can afford given the input size, and fail loudly if the input
+# alone is already too big. This guard only applies to Groq — BYOK OpenRouter
+# and local Ollama have no such ceiling.
+# ============================================================================
+
+TPM_BUDGET = 11000          # leave a little headroom under the 12,000 cap
+MAX_OUT_TOKENS = 5000       # biggest output we'll ever request
+
+
+def _fit_max_tokens(system: str, user: str, floor: int = 800) -> int:
+    """How many output tokens may we request for this prompt?
+
+    Rough input estimate: English is ~4 chars per token, so len(text)//4.
+    * Non-Groq providers: no TPM ceiling — but OpenRouter RESERVES max_tokens
+      worth of credits per call, so request only the floor (what the task
+      needs), not the 5000 cap.
+    * Groq: fit output within the budget left after the input, never below
+      `floor`; if input alone busts the budget, raise a clear 400 error.
+    """
+    est_input = (len(system) + len(user)) // 4
+    if active_provider() != "groq":
+        return floor
+    max_out = max(floor, min(MAX_OUT_TOKENS, TPM_BUDGET - est_input))
+    if est_input + max_out > TPM_BUDGET + 500:   # +500 slack for estimate error
+        raise HTTPException(
+            400,
+            "Input is too large for the model's free-tier token budget. "
+            "Shorten the job description or simplify the master CV "
+            "(or add an OpenRouter key in Settings for no limits).",
+        )
+    return max_out

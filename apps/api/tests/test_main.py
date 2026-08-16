@@ -1,13 +1,13 @@
-# ============================================================================
-# test_main.py — automated checks for the generation pipeline in main.py.
+﻿# ============================================================================
+# test_main.py â€” automated checks for the generation pipeline in main.py.
 #
 # These tests cover the tricky, pure-logic pieces:
 #   * input clamping (length caps on JD, answers, links)
 #   * prompt builders (feedback, cover letter, screenshot questions)
 #   * parsing the model's messy output into clean structures
 #     (feedback JSON, question/answer JSON, LaTeX documents)
-#   * LaTeX repair (dropped preamble → splice master's back in)
-#   * the SSE streaming pipeline — events emitted, ordering, and that a failed
+#   * LaTeX repair (dropped preamble â†’ splice master's back in)
+#   * the SSE streaming pipeline â€” events emitted, ordering, and that a failed
 #     part doesn't kill the others
 #
 # The tests run WITHOUT the real LLM or real compilation: the functions that
@@ -24,26 +24,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # import path to 
 
 from fastapi import HTTPException  # noqa: E402
 
-from main import (  # noqa: E402
-    FINE_TUNE_SYSTEM,
-    Answer,
-    GenerateRequest,
-    _build_resume,
-    _clamp,
-    _clamp_answers,
-    _clamp_links,
-    _clean_model_latex,
-    _cover_letter_prompt,
-    _extract_latex_document,
-    _feedback_prompt,
-    _fine_tune,
-    _fit_max_tokens,
-    _generate_stream,
-    _parse_feedback,
+from llm import _fit_max_tokens  # noqa: E402
+from routes.generate import _generate_stream  # noqa: E402
+from schemas import Answer, GenerateRequest  # noqa: E402
+from services.cover_letter import _cover_letter_prompt  # noqa: E402
+from services.feedback import _feedback_prompt, _parse_feedback  # noqa: E402
+from services.questions import (  # noqa: E402
     _parse_question_answers,
-    _repair_missing_preamble,
     _screenshot_questions_prompt,
 )
+from services.resume import (  # noqa: E402
+    FINE_TUNE_SYSTEM,
+    _build_resume,
+    _clean_model_latex,
+    _extract_latex_document,
+    _fine_tune,
+    _repair_missing_preamble,
+)
+from services.text import _clamp, _clamp_answers, _clamp_links  # noqa: E402
 
 # --- Input-guard tests -----------------------------------------------------------
 
@@ -57,8 +55,8 @@ def test_clamp_answers_filters_blanks_and_caps() -> None:
     """Blank answers are dropped; long answers are cut to 2000 chars."""
     out = _clamp_answers(
         [
-            Answer(question="   ", answer="ignored"),   # blank question → dropped
-            Answer(question="q", answer="a" * 5000),    # too-long answer → trimmed
+            Answer(question="   ", answer="ignored"),   # blank question â†’ dropped
+            Answer(question="q", answer="a" * 5000),    # too-long answer â†’ trimmed
             Answer(question="q2", answer="b"),
         ]
     )
@@ -68,13 +66,13 @@ def test_clamp_answers_filters_blanks_and_caps() -> None:
 
 
 def test_clamp_answers_limits_count() -> None:
-    """More than 20 answers → only the first 20 are kept."""
+    """More than 20 answers â†’ only the first 20 are kept."""
     many = [Answer(question=f"q{i}", answer="a") for i in range(50)]
     assert len(_clamp_answers(many)) == 20
 
 
 def test_clamp_links_filters_blanks_caps_count_and_length() -> None:
-    """Links are trimmed of spaces, blank entries dropped, length ≤ 2048, ≤ 50 total."""
+    """Links are trimmed of spaces, blank entries dropped, length â‰¤ 2048, â‰¤ 50 total."""
     assert _clamp_links(["  https://a.example  ", "", "   "]) == ["https://a.example"]
     assert len(_clamp_links(["x" * 5000])) == 1
     assert len(_clamp_links(["x" * 5000])[0]) == 2048
@@ -101,7 +99,7 @@ def test_cover_letter_prompt_includes_name_and_links() -> None:
 
 
 def test_cover_letter_prompt_without_name_or_links_keeps_placeholder() -> None:
-    """No name → the signature stays '[Your Name]'; no links → no Links section."""
+    """No name â†’ the signature stays '[Your Name]'; no links â†’ no Links section."""
     system, _ = _cover_letter_prompt("Job desc", [], "cv.tex", "", [])
     assert "[Your Name]" in system
     assert "CANDIDATE LINKS" not in system
@@ -129,7 +127,7 @@ def test_extract_latex_document_drops_prose_and_trailing_commentary() -> None:
 
 
 def test_extract_latex_document_returns_input_without_documentclass() -> None:
-    """No \\documentclass marker → return the text untouched (caller decides what to do)."""
+    """No \\documentclass marker â†’ return the text untouched (caller decides what to do)."""
     assert _extract_latex_document("just prose") == "just prose"
 
 
@@ -160,9 +158,9 @@ def test_fine_tune_prompt_keyword_only_edits() -> None:
 # --- Token-budget & retry tests ------------------------------------------------------
 
 def test_fit_max_tokens_non_groq_returns_floor_not_ceiling(monkeypatch) -> None:
-    """Non-Groq providers have no TPM ceiling, so we ask for only the floor —
+    """Non-Groq providers have no TPM ceiling, so we ask for only the floor â€”
     OpenRouter reserves max_tokens of credits per call."""
-    monkeypatch.setattr("main.active_provider", lambda: "openrouter")
+    monkeypatch.setattr("llm.active_provider", lambda: "openrouter")
     assert _fit_max_tokens("system", "user", floor=800) == 800
     assert _fit_max_tokens("system", "user", floor=3000) == 3000
 
@@ -176,8 +174,8 @@ def test_fine_tune_appends_compile_error_hint(monkeypatch) -> None:
         captured["user"] = user   # capture what the fake LLM "saw"
         return "\\documentclass{article}\n\\begin{document}x\n\\end{document}"
 
-    monkeypatch.setattr("main.chat", fake_chat)
-    monkeypatch.setattr("main._fit_max_tokens", lambda *a, **k: 3000)
+    monkeypatch.setattr("services.resume.chat", fake_chat)
+    monkeypatch.setattr("services.resume._fit_max_tokens", lambda *a, **k: 3000)
     _fine_tune("master", "brag", "JD", error_hint="Forbidden control sequence")
     assert "Forbidden control sequence" in captured["user"]
     assert "previous compile attempt failed" in captured["user"].lower()
@@ -208,13 +206,13 @@ def test_repair_missing_preamble_passthrough_when_documentclass_present() -> Non
 
 
 def test_fine_tune_splices_master_preamble_when_documentclass_missing(monkeypatch) -> None:
-    """End-to-end: model returns pure prose → fine-tune still produces a
+    """End-to-end: model returns pure prose â†’ fine-tune still produces a
     compilable-looking document by splicing the master preamble."""
     def fake_chat(system, user, temperature, max_tokens):
         return "just prose, no latex here"
 
-    monkeypatch.setattr("main.chat", fake_chat)
-    monkeypatch.setattr("main._fit_max_tokens", lambda *a, **k: 3000)
+    monkeypatch.setattr("services.resume.chat", fake_chat)
+    monkeypatch.setattr("services.resume._fit_max_tokens", lambda *a, **k: 3000)
     master = (
         "\\documentclass{article}\n"
         "\\newcommand{\\resumeItem}[1]{#1}\n"
@@ -243,8 +241,8 @@ def test_build_resume_regenerates_once_on_compile_failure(monkeypatch) -> None:
             raise HTTPException(502, "LaTeX compile failed. broken")   # first try fails
         return Path("custom-resume.pdf")                                # second try works
 
-    monkeypatch.setattr("main._fine_tune", fake_fine_tune)
-    monkeypatch.setattr("main._compile", fake_compile)
+    monkeypatch.setattr("services.resume._fine_tune", fake_fine_tune)
+    monkeypatch.setattr("services.resume._compile", fake_compile)
     pdf = _build_resume("master", "brag", "JD")
     assert pdf == Path("custom-resume.pdf")
     assert calls["fine_tune"] == 2   # exactly two attempts, no more
@@ -299,7 +297,7 @@ def test_parse_feedback_returns_rating_and_text() -> None:
     rating, _ = _parse_feedback('{"rating": 0, "feedback": "- way too low"}')
     assert rating == 1
 
-    # Not JSON at all → rating None, text passed through
+    # Not JSON at all â†’ rating None, text passed through
     rating, text = _parse_feedback("not json")
     assert rating is None
     assert text == "not json"
@@ -345,10 +343,11 @@ async def test_generate_stream_emits_each_expected_artifact(monkeypatch) -> None
     """A full request (resume + cover letter in pdf and text + feedback) must
     emit exactly the expected SSE events, with the right payloads."""
     # Fake every heavy operation so no LLM or compile actually runs.
-    monkeypatch.setattr("main._fine_tune", lambda *a, **k: "\\documentclass{article}")
-    monkeypatch.setattr("main._compile", lambda *a, **k: Path("custom-resume.pdf"))
-    monkeypatch.setattr("main._cover_letter", lambda *a, **k: "Dear team,")
-    monkeypatch.setattr("main._feedback", lambda *a, **k: (8, "- strong fit"))
+    monkeypatch.setattr("services.resume._fine_tune", lambda *a, **k: "\\documentclass{article}")
+    monkeypatch.setattr("services.resume._compile", lambda *a, **k: Path("custom-resume.pdf"))
+    monkeypatch.setattr("routes.generate._compile", lambda *a, **k: Path("cover-letter.pdf"))
+    monkeypatch.setattr("routes.generate._cover_letter", lambda *a, **k: "Dear team,")
+    monkeypatch.setattr("routes.generate._feedback", lambda *a, **k: (8, "- strong fit"))
     req = GenerateRequest(
         job_description="JD",
         cover_letter_formats=["pdf", "text"],
@@ -373,10 +372,10 @@ async def test_generate_stream_emits_each_expected_artifact(monkeypatch) -> None
 
 
 async def test_generate_stream_always_emits_feedback_even_when_not_requested(monkeypatch) -> None:
-    """Feedback is non-optional — even if the user only asked for a cover
+    """Feedback is non-optional â€” even if the user only asked for a cover
     letter, the feedback event must still appear."""
-    monkeypatch.setattr("main._cover_letter", lambda *a, **k: "Dear team,")
-    monkeypatch.setattr("main._feedback", lambda *a, **k: (6, "- ok"))
+    monkeypatch.setattr("routes.generate._cover_letter", lambda *a, **k: "Dear team,")
+    monkeypatch.setattr("routes.generate._feedback", lambda *a, **k: (6, "- ok"))
     req = GenerateRequest(
         job_description="JD", cover_letter_formats=["text"], parts=["cover_letter"]
     )
@@ -386,7 +385,7 @@ async def test_generate_stream_always_emits_feedback_even_when_not_requested(mon
         "used_master_cv",
         "cover_letter_text",
         "cover_letter_txt",
-        "feedback",          # ← present despite not being requested
+        "feedback",          # â† present despite not being requested
         "done",
     }
 
@@ -397,10 +396,10 @@ async def test_generate_stream_partial_failure_isolates_the_part(monkeypatch) ->
     def boom(*a, **k):
         raise RuntimeError("model down")
 
-    monkeypatch.setattr("main._fine_tune", boom)   # resume generation dies
-    monkeypatch.setattr("main._compile", lambda *a, **k: Path("cover-letter.pdf"))
-    monkeypatch.setattr("main._cover_letter", lambda *a, **k: "Dear team,")
-    monkeypatch.setattr("main._feedback", lambda *a, **k: (7, "- ok"))
+    monkeypatch.setattr("services.resume._fine_tune", boom)   # resume generation dies
+    monkeypatch.setattr("services.resume._compile", lambda *a, **k: Path("cover-letter.pdf"))
+    monkeypatch.setattr("routes.generate._cover_letter", lambda *a, **k: "Dear team,")
+    monkeypatch.setattr("routes.generate._feedback", lambda *a, **k: (7, "- ok"))
     req = GenerateRequest(
         job_description="JD", cover_letter_formats=["text"], parts=["resume", "cover_letter"]
     )

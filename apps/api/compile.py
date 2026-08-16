@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import subprocess  # lets Python run external programs (like tectonic.exe)
 from pathlib import Path  # pathlib.Path = a friendlier way to handle file paths
+from uuid import uuid4  # unique IDs for naming generated files
+
+from fastapi import HTTPException
 
 # This file lives at apps/api/compile.py, so:
 #   __file__ = "apps/api/compile.py"
@@ -73,3 +76,16 @@ def compile_tex(tex: str, output_name: str, out_dir: Path | None = None) -> Path
         tail = "\n".join(log.splitlines()[-25:])   # keep the last 25 log lines — the useful part
         raise RuntimeError(f"tectonic failed for {output_name}:\n{tail}")
     return pdf
+
+
+def _out_name(base: str) -> str:
+    """Give generated files unique names: base-<8 random hex chars>."""
+    return f"{base}-{uuid4().hex[:8]}"
+
+
+def _compile(tex: str, base: str) -> Path:
+    """Compile LaTeX to PDF; surface tectonic failures as a readable 502, not a traceback."""
+    try:
+        return compile_tex(tex, _out_name(base))
+    except RuntimeError as exc:
+        raise HTTPException(502, f"LaTeX compile failed. {exc}") from exc

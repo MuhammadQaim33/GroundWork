@@ -36,6 +36,31 @@ and set a descriptive User-Agent. These are free public endpoints offered in goo
 
 # Done
 
+## 2026-08-16 — Backend modularization: main.py (1032 lines) → routes/ + services/
+
+- Goal: modular, easy-to-follow backend without breaking anything. Zero behavior
+  change — all routes, JSON shapes, `uvicorn main:app` entrypoint identical.
+- `main.py` 1032 → ~90 lines: FastAPI app + CORS + `/out` mount + global LLM error
+  handler + 4× `include_router`. No endpoints or logic left in it.
+- `schemas.py` (new): all Pydantic models (Answer, Credentials, RefreshRequest,
+  GenerateRequest, SettingsUpdate, LinksUpdate).
+- `routes/` (new, one APIRouter per resource): `auth.py` (/api/auth/*),
+  `profile.py` (master-cvs + brag-doc CRUD), `settings.py` (/api/settings, /api/links),
+  `generate.py` (/api/generate SSE + /api/screenshot-questions + `_generate_stream`).
+- `services/` (new, pure logic): `sse.py`, `text.py` (clamps + JSON-from-LLM helpers),
+  `resume.py` (fine-tune/build/pick), `cover_letter.py`, `feedback.py`, `questions.py`.
+- Helpers promoted to their owning module: `_fit_max_tokens` → `llm.py` (provider
+  budgeting), `_compile`/`_out_name` → `compile.py` (LaTeX).
+- `tests/test_main.py` retargeted: imports → new module homes; monkeypatch strings
+  (`main.X`) → `services.resume.X` / `routes.generate.X` / `llm.X` per call path;
+  the pdf-format stream test now patches `_compile` at both `services.resume` (resume
+  path) and `routes.generate` (cover-letter-pdf path).
+- Checks: pytest 37 pass (1 pre-existing ASD-STE100 prompt-string failure, verified
+  identical on the pre-change baseline via stash), ruff clean on all new files (only
+  pre-existing store.py E501 remains), OpenAPI spec lists all 11 path patterns /
+  17 endpoints unchanged, `uvicorn main:app` boots and serves /docs 200.
+- No schema change (schema.md untouched).
+
 ## 2026-08-16 — Fix: "Stuck at Generating…" — provider failover on quota exhaustion
 
 - Symptom: clicking Generate shows "Generating…" forever — the SSE stream emitted
