@@ -22,9 +22,9 @@ import base64  # encodes binary image data into text form for transport
 import time
 
 import httpx  # the HTTP client library (sends web requests)
-from fastapi import HTTPException
 
 from config import settings
+from errors import TokenBudgetError
 from user_settings import get_gemini_key, get_openrouter_key
 
 # The web addresses of the AI providers' API endpoints. Each is "OpenAI-compatible".
@@ -290,8 +290,7 @@ def _fit_max_tokens(system: str, user: str, floor: int = 800) -> int:
         return floor
     max_out = max(floor, min(MAX_OUT_TOKENS, TPM_BUDGET - est_input))
     if est_input + max_out > TPM_BUDGET + 500:   # +500 slack for estimate error
-        raise HTTPException(
-            400,
+        raise TokenBudgetError(
             "Input is too large for the model's free-tier token budget. "
             "Shorten the job description or simplify the master CV "
             "(or add an OpenRouter key in Settings for no limits).",

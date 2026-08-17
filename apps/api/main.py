@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse  # response types
 from fastapi.staticfiles import StaticFiles  # serve static files (generated PDFs)
 
 from compile import OUT_DIR
+from errors import GenerationError
 from routes import auth, generate, profile, settings
 
 # Create the FastAPI application object. Routers below attach their routes to
@@ -52,6 +53,17 @@ async def llm_provider_error(_request: Request, exc: httpx.HTTPStatusError):
     return JSONResponse(
         status_code=status,
         content={"detail": f"LLM provider error ({exc.response.status_code}). {snippet}"},
+    )
+
+
+# The logic layer raises DOMAIN errors (errors.py), never HTTP ones. This is
+# the single place they become HTTP responses — services stay usable by the
+# MCP layer and the Radar cron, which catch them directly instead.
+@app.exception_handler(GenerationError)
+async def generation_error(_request: Request, exc: GenerationError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": str(exc)},
     )
 
 

@@ -25,10 +25,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # import path to 
 from fastapi import HTTPException  # noqa: E402
 
 from llm import _fit_max_tokens  # noqa: E402
-from routes.generate import _generate_stream  # noqa: E402
 from schemas import Answer, GenerateRequest  # noqa: E402
 from services.cover_letter import _cover_letter_prompt  # noqa: E402
 from services.feedback import _feedback_prompt, _parse_feedback  # noqa: E402
+from services.pipeline import _generate_stream  # noqa: E402
 from services.questions import (  # noqa: E402
     _parse_question_answers,
     _screenshot_questions_prompt,
@@ -345,9 +345,9 @@ async def test_generate_stream_emits_each_expected_artifact(monkeypatch) -> None
     # Fake every heavy operation so no LLM or compile actually runs.
     monkeypatch.setattr("services.resume._fine_tune", lambda *a, **k: "\\documentclass{article}")
     monkeypatch.setattr("services.resume._compile", lambda *a, **k: Path("custom-resume.pdf"))
-    monkeypatch.setattr("routes.generate._compile", lambda *a, **k: Path("cover-letter.pdf"))
-    monkeypatch.setattr("routes.generate._cover_letter", lambda *a, **k: "Dear team,")
-    monkeypatch.setattr("routes.generate._feedback", lambda *a, **k: (8, "- strong fit"))
+    monkeypatch.setattr("services.pipeline._compile", lambda *a, **k: Path("cover-letter.pdf"))
+    monkeypatch.setattr("services.pipeline._cover_letter", lambda *a, **k: "Dear team,")
+    monkeypatch.setattr("services.pipeline._feedback", lambda *a, **k: (8, "- strong fit"))
     req = GenerateRequest(
         job_description="JD",
         cover_letter_formats=["pdf", "text"],
@@ -374,8 +374,8 @@ async def test_generate_stream_emits_each_expected_artifact(monkeypatch) -> None
 async def test_generate_stream_always_emits_feedback_even_when_not_requested(monkeypatch) -> None:
     """Feedback is non-optional â€” even if the user only asked for a cover
     letter, the feedback event must still appear."""
-    monkeypatch.setattr("routes.generate._cover_letter", lambda *a, **k: "Dear team,")
-    monkeypatch.setattr("routes.generate._feedback", lambda *a, **k: (6, "- ok"))
+    monkeypatch.setattr("services.pipeline._cover_letter", lambda *a, **k: "Dear team,")
+    monkeypatch.setattr("services.pipeline._feedback", lambda *a, **k: (6, "- ok"))
     req = GenerateRequest(
         job_description="JD", cover_letter_formats=["text"], parts=["cover_letter"]
     )
@@ -398,8 +398,8 @@ async def test_generate_stream_partial_failure_isolates_the_part(monkeypatch) ->
 
     monkeypatch.setattr("services.resume._fine_tune", boom)   # resume generation dies
     monkeypatch.setattr("services.resume._compile", lambda *a, **k: Path("cover-letter.pdf"))
-    monkeypatch.setattr("routes.generate._cover_letter", lambda *a, **k: "Dear team,")
-    monkeypatch.setattr("routes.generate._feedback", lambda *a, **k: (7, "- ok"))
+    monkeypatch.setattr("services.pipeline._cover_letter", lambda *a, **k: "Dear team,")
+    monkeypatch.setattr("services.pipeline._feedback", lambda *a, **k: (7, "- ok"))
     req = GenerateRequest(
         job_description="JD", cover_letter_formats=["text"], parts=["resume", "cover_letter"]
     )

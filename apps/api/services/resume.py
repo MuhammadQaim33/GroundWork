@@ -14,9 +14,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from fastapi import HTTPException
-
 from compile import _compile
+from errors import CompileError
 from llm import _fit_max_tokens, chat
 
 FINE_TUNE_SYSTEM = (
@@ -106,7 +105,7 @@ def _fine_tune(
     if "documentclass" not in edited.lower():
         edited = _repair_missing_preamble(edited, master_tex)
         if "documentclass" not in edited.lower():
-            raise HTTPException(502, "Model produced invalid LaTeX (no documentclass). Try again.")
+            raise CompileError("Model produced invalid LaTeX (no documentclass). Try again.")
     return edited
 
 

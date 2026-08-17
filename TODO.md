@@ -36,6 +36,31 @@ and set a descriptive User-Agent. These are free public endpoints offered in goo
 
 # Done
 
+## 2026-08-16 — Architecture hardening: HTTP decoupled from services (P0) + test seams (P1)
+
+- **P0 — domain errors replace HTTPException in the logic layer.** New `errors.py`:
+  `GenerationError` (base, `status_code=502`, clean `str()`), `TokenBudgetError` (400),
+  `CompileError` (502). `llm._fit_max_tokens` → `TokenBudgetError`; `compile._compile` and
+  `services/resume._fine_tune` → `CompileError`. `services/sse._stream_error` renders
+  `GenerationError` message without a class prefix (SSE output unchanged). `main.py`
+  registers ONE `GenerationError` exception handler → `{detail, status_code}` — the single
+  translation point, so the future MCP server and Radar cron can catch these directly
+  instead of sniffing HTTPException.
+- **P1 — `_generate_stream` moved routes/generate.py → `services/pipeline.py`** (orchestration
+  is transport-neutral; routes/generate.py slimmed 254 → 131 lines, now pure HTTP validation).
+  Test monkeypatch targets retargeted `routes.generate.*` → `services.pipeline.*` (the stream
+  tests patch at the module where the pipeline resolves its names).
+- **P1 — test seams.** New `tests/conftest.py` with `authed_client` fixture (TestClient over the
+  real app + `app.dependency_overrides[require_service_user]` → stub user) and
+  `tests/test_routes.py` with two route-level tests: one proves the override lets a real route
+  run with a faked store; one proves a `CompileError` raised inside a route becomes HTTP 502 via
+  the handler. Route-level testing (needed for Radar/Screener/etc.) is now possible.
+- Checks: pytest **39 pass** (37 baseline + 2 new route tests; the 1 pre-existing ASD-STE100
+  prompt-string failure untouched, verified on baseline earlier), ruff clean on all new/changed
+  files (only the pre-existing store.py E501 remains), OpenAPI still lists the same 12 paths,
+  domain errors render correct statuses (400/502) via TestClient ASGI stack.
+- No schema change (schema.md untouched). Logged per Working Agreement.
+
 ## 2026-08-16 — Backend modularization: main.py (1032 lines) → routes/ + services/
 
 - Goal: modular, easy-to-follow backend without breaking anything. Zero behavior

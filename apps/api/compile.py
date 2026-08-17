@@ -17,7 +17,7 @@ import subprocess  # lets Python run external programs (like tectonic.exe)
 from pathlib import Path  # pathlib.Path = a friendlier way to handle file paths
 from uuid import uuid4  # unique IDs for naming generated files
 
-from fastapi import HTTPException
+from errors import CompileError
 
 # This file lives at apps/api/compile.py, so:
 #   __file__ = "apps/api/compile.py"
@@ -84,8 +84,8 @@ def _out_name(base: str) -> str:
 
 
 def _compile(tex: str, base: str) -> Path:
-    """Compile LaTeX to PDF; surface tectonic failures as a readable 502, not a traceback."""
+    """Compile LaTeX to PDF; surface tectonic failures as a CompileError, not a traceback."""
     try:
         return compile_tex(tex, _out_name(base))
     except RuntimeError as exc:
-        raise HTTPException(502, f"LaTeX compile failed. {exc}") from exc
+        raise CompileError(f"LaTeX compile failed. {exc}") from exc

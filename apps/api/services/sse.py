@@ -13,6 +13,8 @@ import json
 import httpx
 from fastapi import HTTPException
 
+from errors import GenerationError
+
 
 def _sse(event: str, data: dict) -> str:
     """Format one SSE event as the wire format:
@@ -27,6 +29,8 @@ def _stream_error(exc: Exception) -> str:
     """Turn any exception into a short, human-readable error string for SSE."""
     if isinstance(exc, HTTPException):      # a deliberate API error → use its message
         return str(exc.detail)
+    if isinstance(exc, GenerationError):    # a domain error → its message, no class prefix
+        return str(exc)
     if isinstance(exc, httpx.HTTPStatusError):   # an AI provider error
         return f"LLM provider error ({exc.response.status_code}). {exc.response.text[:300]}"
     return f"Generation failed: {exc}"      # anything else → generic message
