@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends
 from auth import require_service_user
 from llm import active_provider
 from schemas import LinksUpdate, SettingsUpdate
-from services.text import _clamp_links
+from services.text import clamp_links
 from user_settings import (
     get_gemini_key,
     get_links,
@@ -52,7 +52,7 @@ def api_get_links(_sv: Annotated[dict, Depends(require_service_user)]):
 
 @router.put("/api/links")
 def api_put_links(req: LinksUpdate, _sv: Annotated[dict, Depends(require_service_user)]):
-    """Save the user's profile links (sanitized by _clamp_links)."""
-    links = _clamp_links(req.links)
+    """Save the user's profile links (sanitized by clamp_links)."""
+    links = clamp_links(req.links)
     set_links(links)
     return {"links": links}

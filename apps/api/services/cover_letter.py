@@ -7,24 +7,21 @@ from __future__ import annotations
 import re
 
 from llm import chat
-from schemas import Answer
 
 
-def _cover_letter(
+def cover_letter(
     job_description: str,
-    answers: list[Answer],
     cv_name: str,
     name: str = "",
     links: list[str] | None = None,
 ) -> str:
     """Write the cover letter: prompt → model call → return the letter text."""
-    system, user = _cover_letter_prompt(job_description, answers, cv_name, name, links or [])
+    system, user = cover_letter_prompt(job_description, cv_name, name, links or [])
     return chat(system, user, temperature=0.4, max_tokens=1500).strip()
 
 
-def _cover_letter_prompt(
+def cover_letter_prompt(
     job_description: str,
-    answers: list[Answer],
     cv_name: str,
     name: str,
     links: list[str],
@@ -34,15 +31,8 @@ def _cover_letter_prompt(
     The system prompt is built conditionally: the signature uses the real name
     if provided, else a placeholder; links are listed only if the user has any.
     """
-    # Answers to application-form questions, formatted Q:/A: per line.
-    answers_block = "\n".join(
-        f"Q: {a.question}\nA: {a.answer}"
-        for a in answers
-        if a.question.strip() and a.answer.strip()
-    )
     user = (
         f"JOB DESCRIPTION:\n{job_description}\n\n"
-        + (f"FORM ANSWERS:\n{answers_block}\n\n" if answers_block else "")
         + f"RESUME FILENAME: {cv_name}"
     )
     if name:
@@ -53,7 +43,7 @@ def _cover_letter_prompt(
         "You write concise, specific cover letters (about 250 words)"
         "Short sentences, one idea per sentence, simple "
         "unambiguous vocabulary. Ground every claim in the job description and the candidate's "
-        "own answers; never invent experience or numbers. "
+        "resume; never invent experience or numbers. "
         "Optimize for recruiter attractiveness and recruiter ease to read"
     )
     if name:
@@ -101,7 +91,7 @@ def _escape_latex(s: str) -> str:
     return re.sub(r"[\\{}%$&#_~^]", lambda m: _LATEX_SPECIALS[m.group(0)], s)
 
 
-def _letter_to_tex(letter_text: str) -> str:
+def letter_to_tex(letter_text: str) -> str:
     """Wrap a plain-text cover letter into a minimal compilable LaTeX document.
 
     Splits the letter into paragraphs (separated by blank lines), escapes each

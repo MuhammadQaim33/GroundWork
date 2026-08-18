@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""               # Bring-Your-Own-Key: pay-as-you-go, many models
     gemini_api_key: str = ""                   # Google AI Studio free tier
     llm_provider: str = "groq"                 # Primary provider: groq|gemini|openrouter|ollama
-    llm_model: str = "llama-3.3-70b-versatile" # Text model used on Groq
+    llm_model: str = "openai/gpt-oss-120b"  # Text model used on Groq (free tier)
     openrouter_model: str = "google/gemini-2.5-flash"
     openrouter_vision_model: str = "google/gemini-2.5-flash"  # vision-capable model on OpenRouter
     gemini_model: str = "gemini-3.6-flash"     # Text model on Gemini

@@ -2,9 +2,6 @@
 
 Continuous job-search agent: discovers roles → screens against real resume → researches companies → generates grounded application packages → autofills forms (human submits) → preps + mock-interviews the candidate → learns from outcomes. $0-to-run (local models + free tiers), BYOK for vision/voice.
 
-## The Thesis
-Cold applications convert to interviews at ~2–8%; the average posting draws ~242 applicants; ~75% of resumes are rejected by ATS keyword screens before a human reads them. **Volume is the weak lever.** Every pillar targets a strong lever instead: be early (Radar) · survive the screen (Armory) · be specific (Scout) · afford to be selective (Doorway) · convert the interviews you do land (Coach) · learn what works (Analytics).
-
 ## Non-Negotiable Design Rules
 - **MULTI-USER SAAS APP.** Groundwork is a multi-tenant SaaS, not a local tool. Every user's data is tenant-scoped in Supabase with RLS (per-user rows, per-user storage). **No changes may ever be saved LOCALLY** — no state written to local disk, no JSON files as persistence, no file-based settings or caches. All user data (settings, API keys, uploads, generations, outcomes) lives in the database/storage keyed by the user. Local filesystem writes are forbidden for anything user-facing or cross-request.
 - **Discovery automated, submission human.** Agent fills forms, verifies, stops at submit — always.
@@ -24,39 +21,19 @@ Cold applications convert to interviews at ~2–8%; the average posting draws ~2
 
 **Delivery:** Next.js/Vercel · Supabase (Postgres+pgvector) · GitHub Actions cron (every 2h) · Telegram digests (batched, threshold-gated) · Cloudflare Email Routing forward-in address per user (email-adapter path) · local sentence-transformers + local LLM core · BYOK for vision/voice.
 
-## Course Lesson Mapping
-Each build day cites `microsoft/generative-ai-for-beginners` (**GenAI NN**) and `microsoft/ai-agents-for-beginners` (**Agents NN**) lessons. `microsoft/graphrag` — genuinely relevant to **one optional module only** (Module X, the career knowledge-graph); not used in the core pipeline, where retrieval is flat. `microsoft/ML-For-Beginners` — **not used**: no model training anywhere; the analytics engine is descriptive statistics and correlation over your own outcomes, explicitly not ML.
+## Where Things Live
+Data model → `schema.md` (RLS-scoped tables, FKs, relationships) · **TODO.md = today's agenda only** (agent input, not a log) · build plan, cut order, phase checkpoints, optional modules → `TODO.md`.
 
-## Data Model (key tables, all RLS-scoped by user)
-Core: `profiles, resume_evidence, jobs, job_requirements, company_briefs, matches, generations, applications, outcomes, eval_runs, traces`
-Added: `autofill_sessions` (application_id, ats_type, fields_filled, vision_fallback_used, screenshot_path, review_status, duration_ms) · `interview_preps` (question_bank with why_asked + category + grounded_gap, tech_prep, culture_notes, sources) · `mock_sessions` (prep_id, transcript, per_answer_scores, readiness_score, weaknesses, mode text|voice) · `analytics_snapshots` (response_rate_by{source, role_type, score_band, gap, latency_bucket, resume_version}, market_trends) · `resume_versions` (label, content, created_at, derived_from_outcomes)
-
-## Build Plan — 7 Phases, ~30 Days
-| Phase | Days | Deliverable | Checkpoint |
-|---|---|---|---|
-| 1 Radar | 1–3 | Tag-based ingestion, dedupe, email adapter, orchestration (isolation, traces, /debug) | ✅ 1 — speed finding: jobs seen 18–48h before LinkedIn, real `first_seen_at` deltas |
-| 2 Screener | 4–6 | Atomic evidence extraction, cached JD extraction, two-stage matching, calibrated on 20 known-good/bad jobs | |
-| 3 Scout & Armory | 7–10 | Scout research agent, ATS resume optimizer loop, grounded gen + adversarial validator, eval harness gated in CI | ✅ 2 — Scout agent · ✅ 3 — validator: before/after fabrication rate, zero fabrications allowed |
-| 4 Doorway | 11–15 | DOM-first autofill, vision fallback, screenshot verification, stop-at-submit, extension + guided panel, `docs/autofill-limits.md` | ✅ 4 — autofill demo: real form fills itself, verifies, stops at submit |
-| 5 Coach | 16–21 | Gap-aware prep guide, question bank + difficulty, text mock (2-agent), voice mode, readiness + spaced rehearsal | ✅ 5 — interview coach: voice mock catches an over-claimed answer |
-| 6 Analytics | 22–25 | Correlation engine, market intelligence, resume evolution, dashboard + weekly narrative | ✅ 6 — analytics engine: honestly-caveated slices |
-| 7 Ship | 26–30 | Unified dashboard, notifications + multi-user RLS + onboarding, MCP layer, deploy + eval consolidation + `docs/limitations.md`, launch | ✅ 7 — MCP layer: discovery→prep by conversation · ✅ 8 — launch |
-
-Cut order if behind schedule: (1) optional modules → (2) voice mode (text-only mock) → (3) resume-evolution suggestions (analytics read-only) → (4) market intelligence (personal analytics only) → (5) MCP layer (capstone, never load-bearing) → (6) vision fallback (DOM-only autofill + guided panel).
-**Never cut (the spine):** grounding validator + eval CI · tag-based discovery + auto-grown ATS speed layer · DOM autofill with stop-at-submit · grounded interview prep · personal analytics correlation engine.
-
-## Optional Modules (roadmap only, non-load-bearing)
-- **Module D — Application autopsy** — adversary agent reads your package as a skeptical hiring manager; flags what's unconvincing (not just untrue). The validator's confrontational cousin.
-- **Module C — Non-text assets** — tailored one-pager mapping your experience to a role's must-haves.
-- **Module X — Career knowledge-graph** — GraphRAG over skills↔roles↔companies↔evidence for structural queries ("shortest skill path to the senior AI-eng roles I want"). The one place graph retrieval earns its keep.
-- **Module E — Longitudinal profile evolution** — full career-trajectory view tuned by cumulative outcomes (deepens the resume-evolution work).
-- **Module V — Vision autofill as standalone OSS tool** — extract Doorway into its own documented repo.
+## Non-Negotiables That Survive Scheduling (never cut)
+Grounding validator + eval CI · tag-based discovery + auto-grown ATS speed layer · DOM autofill with stop-at-submit · grounded interview prep · personal analytics correlation engine.
 
 ## Working Agreement
-- **Before starting work each session: read `TODO.md`** to see what's done and what's left for today. Ground every task in its "Today" section — don't scope-creep beyond it.
-- **Log everything you do**: after completing each task, append the result under a "done" section in `TODO.md` so the next session can see exactly what's finished and what remains.
+- **Before starting work each session: read `TODO.md`** — it holds today's agenda in its "Today" section. Ground every task in it; don't scope-creep. **TODO.md is input only** — never append work logs, status, or records there; leave it clean for your next agenda paste.
 - **Schema changes: always update `schema.md`.** Every time a schema change is made (new/renamed/dropped table or column, constraint, index, or relationship), record it in `schema.md` in the same task — don't leave it for later.
 - **Read `schema.md` to understand the data model**: before touching anything data-related, refer to `schema.md` to see how the tables relate to each other (FKs, tenant-scoping, RLS).
+- **Comment all work done**: any code written or changed is commented.
+- **Report changes by file + function**: after implementing a feature, tell the user the file name and which function(s) were made/changed so they can follow along.
+- **No `_`-suffixed functions for public use**: a function used publicly (imported/called outside its defining module) must not carry a leading-underscore-style private marker. Reserve `_` naming for truly module-private helpers.
 
 ## Risks
 - Browser agents break → DOM-first + vision fallback + hard step budgets; ATS layout drift caught by a fixture eval suite (saved real forms) measuring fill accuracy per ATS.

@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import re
 
-from llm import _fit_max_tokens, chat
-from services.text import _first_json_object, _strip_json_fence
+from llm import chat, fit_max_tokens
+from services.text import first_json_object, strip_json_fence
 
 FEEDBACK_SYSTEM = (
     "You are a career advisor reviewing a candidate against a job description. "
@@ -23,7 +23,7 @@ FEEDBACK_SYSTEM = (
 )
 
 
-def _feedback_prompt(job_description: str, master_tex: str, brag_text: str) -> tuple[str, str]:
+def feedback_prompt(job_description: str, master_tex: str, brag_text: str) -> tuple[str, str]:
     """Build the (system, user) prompt for the feedback job."""
     user = (
         f"JOB DESCRIPTION:\n{job_description}\n\n"
@@ -44,10 +44,10 @@ def _clamp_rating(rating: object) -> int | None:
     return max(1, min(10, rating))   # clamp into 1..10
 
 
-def _parse_feedback(raw: str) -> tuple[int | None, str]:
+def parse_feedback(raw: str) -> tuple[int | None, str]:
     """Parse the model's JSON into (rating 1-10, feedback text); fall back on failure."""
-    text = _strip_json_fence(raw)
-    data = _first_json_object(text)
+    text = strip_json_fence(raw)
+    data = first_json_object(text)
     if data is not None:
         fb = data.get("feedback")
         if isinstance(fb, str) and fb.strip():
@@ -66,8 +66,8 @@ def _rating_in_text(text: str) -> object:
     return m.group(1) if m else None
 
 
-def _feedback(job_description: str, master_tex: str, brag_text: str) -> tuple[int | None, str]:
+def feedback(job_description: str, master_tex: str, brag_text: str) -> tuple[int | None, str]:
     """Run the feedback job end-to-end: prompt → model call → parse. Returns (rating, text)."""
-    system, user = _feedback_prompt(job_description, master_tex, brag_text)
-    max_tokens = _fit_max_tokens(system, user, floor=800)
-    return _parse_feedback(chat(system, user, temperature=0.3, max_tokens=max_tokens).strip())
+    system, user = feedback_prompt(job_description, master_tex, brag_text)
+    max_tokens = fit_max_tokens(system, user, floor=800)
+    return parse_feedback(chat(system, user, temperature=0.3, max_tokens=max_tokens).strip())

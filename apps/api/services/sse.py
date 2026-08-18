@@ -16,7 +16,7 @@ from fastapi import HTTPException
 from errors import GenerationError
 
 
-def _sse(event: str, data: dict) -> str:
+def sse(event: str, data: dict) -> str:
     """Format one SSE event as the wire format:
        event: <name>\n
        data: <json>\n
@@ -25,7 +25,7 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _stream_error(exc: Exception) -> str:
+def stream_error(exc: Exception) -> str:
     """Turn any exception into a short, human-readable error string for SSE."""
     if isinstance(exc, HTTPException):      # a deliberate API error → use its message
         return str(exc.detail)

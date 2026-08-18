@@ -111,7 +111,7 @@ export default function GeneratePage() {
     try {
       const req: GenerateRequest = {
         jobDescription,
-        answers: rows.map(({ question, answer }) => ({ question, answer })),
+        questions: rows.map(({ question }) => question.trim()).filter(Boolean),
         coverLetterFormats: formats,
         parts,
       };
@@ -120,6 +120,21 @@ export default function GeneratePage() {
           case "used_master_cv":
             setUsedMasterCv(ev.data.usedMasterCv);
             break;
+          case "questions_answered": {
+            // Backend answered the form questions from the CV + brag doc; fill
+            // them into the matching rows (read-only display).
+            const byQuestion = new Map(
+              ev.data.answers.map((a) => [a.question.trim().toLowerCase(), a.answer])
+            );
+            setRows((r) =>
+              r.map((row) =>
+                byQuestion.has(row.question.trim().toLowerCase())
+                  ? { ...row, answer: byQuestion.get(row.question.trim().toLowerCase())! }
+                  : row
+              )
+            );
+            break;
+          }
           case "resume":
             setResume(ev.data);
             break;
@@ -157,8 +172,9 @@ export default function GeneratePage() {
       <div>
         <h1 className="text-2xl font-semibold text-uber-black">Generate application</h1>
         <p className="mt-1 text-sm text-uber-gray">
-          Paste a job description, add optional answers, then generate a tailored resume, cover
-          letter, and fit feedback. The resume is auto-matched from your master CVs.
+          Paste a job description, add optional questions (the app answers them from your CV
+          and brag doc), then generate a tailored resume, cover letter, and fit feedback. The
+          resume is auto-matched from your master CVs.
         </p>
       </div>
 
@@ -244,27 +260,28 @@ export default function GeneratePage() {
         <div className="mt-3 flex flex-col gap-3">
           {rows.length === 0 && <p className="text-sm text-uber-gray">No questions yet — e.g. “Why do you want to work here?”</p>}
           {rows.map((row) => (
-            <div key={row.id} className="flex items-start gap-2">
-              <input
-                value={row.question}
-                onChange={(e) => updateRow(row.id, { question: e.target.value })}
-                placeholder="Question"
-                className="w-2/5 rounded-md border border-uber-line bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-uber-green"
-              />
-              <input
-                value={row.answer}
-                onChange={(e) => updateRow(row.id, { answer: e.target.value })}
-                placeholder="Answer"
-                className="flex-1 rounded-md border border-uber-line bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-uber-green"
-              />
-              <button
-                type="button"
-                onClick={() => removeRow(row.id)}
-                aria-label="Remove question"
-                className="rounded-md px-2 py-2 text-uber-gray transition-colors hover:bg-uber-green-soft hover:text-uber-green-dark"
-              >
-                ✕
-              </button>
+            <div key={row.id} className="flex flex-col gap-2">
+              <div className="flex items-start gap-2">
+                <input
+                  value={row.question}
+                  onChange={(e) => updateRow(row.id, { question: e.target.value })}
+                  placeholder="Question"
+                  className="w-full rounded-md border border-uber-line bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-uber-green"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeRow(row.id)}
+                  aria-label="Remove question"
+                  className="rounded-md px-2 py-2 text-uber-gray transition-colors hover:bg-uber-green-soft hover:text-uber-green-dark"
+                >
+                  ✕
+                </button>
+              </div>
+              {row.answer && (
+                <p className="rounded-md bg-uber-green-soft px-3 py-2 text-sm text-uber-black">
+                  {row.answer}
+                </p>
+              )}
             </div>
           ))}
         </div>

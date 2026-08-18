@@ -34,7 +34,7 @@ class RefreshRequest(BaseModel):
 class GenerateRequest(BaseModel):
     """The body of a /api/generate call: what the user asked for."""
     job_description: str
-    answers: list[Answer] = []                       # optional answers to form questions
+    questions: list[str] = []       # form questions; backend answers them from CV + brag doc
     cover_letter_formats: list[Literal["pdf", "text"]] = ["pdf"]   # which formats of the letter
     parts: list[Literal["resume", "cover_letter", "feedback"]] = ["resume", "cover_letter"]
     # ^ which artifacts to produce. Literal[...] means ONLY those exact values are allowed.

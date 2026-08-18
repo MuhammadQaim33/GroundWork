@@ -14,9 +14,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from compile import _compile
+from compile import compile_pdf
 from errors import CompileError
-from llm import _fit_max_tokens, chat
+from llm import chat, fit_max_tokens
 
 FINE_TUNE_SYSTEM = (
     "You are a resume editor. Your only goal: maximize the chance this resume gets an "
@@ -36,7 +36,7 @@ FINE_TUNE_SYSTEM = (
 )
 
 
-def _extract_latex_document(text: str) -> str:
+def extract_latex_document(text: str) -> str:
     """Cut any prose the model added before \\documentclass or after \\end{document}."""
     m = re.search(r"\\documentclass", text, re.IGNORECASE)
     if not m:
@@ -48,7 +48,7 @@ def _extract_latex_document(text: str) -> str:
     return body
 
 
-def _repair_missing_preamble(model_output: str, master_tex: str) -> str:
+def repair_missing_preamble(model_output: str, master_tex: str) -> str:
     """If the model dropped the preamble (no \\documentclass), splice the master's back in.
 
     The fine-tune prompt asks for keyword-level edits, so a model occasionally
@@ -75,7 +75,7 @@ def _repair_missing_preamble(model_output: str, master_tex: str) -> str:
     return repaired
 
 
-def _fine_tune(
+def fine_tune(
     master_tex: str,
     brag_text: str,
     job_description: str,
@@ -97,35 +97,35 @@ def _fine_tune(
             f"{error_hint[:1200]}\n\n"
             "Fix this LaTeX error. Output the complete corrected .tex source."
         )
-    max_tokens = _fit_max_tokens(FINE_TUNE_SYSTEM, user, floor=3000)
-    edited = _clean_model_latex(
+    max_tokens = fit_max_tokens(FINE_TUNE_SYSTEM, user, floor=3000)
+    edited = clean_model_latex(
         chat(FINE_TUNE_SYSTEM, user, temperature=0.3, max_tokens=max_tokens).strip()
     )
     # ponytail: LLM LaTeX may not compile — splice a dropped preamble, then fail loud.
     if "documentclass" not in edited.lower():
-        edited = _repair_missing_preamble(edited, master_tex)
+        edited = repair_missing_preamble(edited, master_tex)
         if "documentclass" not in edited.lower():
             raise CompileError("Model produced invalid LaTeX (no documentclass). Try again.")
     return edited
 
 
-def _clean_model_latex(text: str) -> str:
+def clean_model_latex(text: str) -> str:
     """Clean the model's output: strip code fences, then any prose around the document."""
     if text.startswith("```"):
         text = "\n".join(text.splitlines()[1:])
         if text.rstrip().endswith("```"):
             text = "\n".join(text.splitlines()[:-1])
-    return _extract_latex_document(text.strip())
+    return extract_latex_document(text.strip())
 
 
-def _build_resume(master_tex: str, brag_text: str, job_description: str) -> Path:
+def build_resume(master_tex: str, brag_text: str, job_description: str) -> Path:
     """Fine-tune + compile the resume; regenerate once if the LLM's LaTeX fails to compile."""
     error_hint = ""
     last_error: Exception | None = None
     for _ in range(2):   # at most 2 attempts: first try, then one repair try
-        edited = _fine_tune(master_tex, brag_text, job_description, error_hint)
+        edited = fine_tune(master_tex, brag_text, job_description, error_hint)
         try:
-            return _compile(edited, "custom-resume")
+            return compile_pdf(edited, "custom-resume")
         except Exception as exc:
             last_error = exc
             error_hint = str(exc)   # feed the error back so the next try can fix it
@@ -136,7 +136,7 @@ def _build_resume(master_tex: str, brag_text: str, job_description: str) -> Path
 # Master-CV auto-picking — which CV is the best starting point for this JD?
 # ============================================================================
 
-def _pick_cv(cvs: list[dict], job_description: str) -> dict:
+def pick_cv(cvs: list[dict], job_description: str) -> dict:
     """Auto-pick the best master CV for the JD. LLM scores candidates; preferred breaks ties."""
     if len(cvs) == 1:
         return cvs[0]   # only one option — no need to ask the model

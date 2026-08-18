@@ -83,7 +83,7 @@ def _out_name(base: str) -> str:
     return f"{base}-{uuid4().hex[:8]}"
 
 
-def _compile(tex: str, base: str) -> Path:
+def compile_pdf(tex: str, base: str) -> Path:
     """Compile LaTeX to PDF; surface tectonic failures as a CompileError, not a traceback."""
     try:
         return compile_tex(tex, _out_name(base))

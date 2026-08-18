@@ -58,7 +58,7 @@ def chat(
     # plus the generation settings. Then _post_completion walks the provider
     # chain until one answers.
     return _post_completion(
-        _provider_chain(),
+        provider_chain(),
         {
             "messages": [
                 {"role": "system", "content": system},
@@ -105,7 +105,17 @@ def _post_completion(
                     response.raise_for_status()  # if status isn't 2xx, raises HTTPStatusError
                 # Success: pluck the text out of the standard response shape.
                 # response.json() = "choices" -> [0] = first answer -> "message" -> "content"
-                return response.json()["choices"][0]["message"]["content"]
+                try:
+                    content = response.json()["choices"][0]["message"].get("content")
+                except (KeyError, IndexError, TypeError):
+                    content = None
+                if not content:
+                    # Some providers (Gemini free tier) return 200 with NO text when
+                    # the response's "thinking" budget eats all of max_tokens. Treat
+                    # that as a provider failure and fail over — the answer isn't there.
+                    last_error = RuntimeError(f"{model} returned empty content")
+                    break
+                return content
             except httpx.HTTPStatusError as exc:
                 last_error = exc
                 if exc.response.status_code in (429, 413):
@@ -166,7 +176,7 @@ def active_provider() -> str:
     """Which provider a call will hit first: ollama, gemini, openrouter, or groq.
 
     Used elsewhere to decide things like "is this the free tier with a token
-    budget?" — see _fit_max_tokens in main.py.
+    budget?" — see fit_max_tokens in llm.py.
     """
     if settings.llm_provider.lower() == "ollama":
         return "ollama"
@@ -175,7 +185,7 @@ def active_provider() -> str:
     return "openrouter" if get_openrouter_key() else "groq"
 
 
-def _provider_chain() -> list[tuple[str, str, dict[str, str]]]:
+def provider_chain() -> list[tuple[str, str, dict[str, str]]]:
     """Build the full ordered list of providers available right now.
 
     Only providers that are actually configured are included:
@@ -221,9 +231,9 @@ def _provider_chain() -> list[tuple[str, str, dict[str, str]]]:
     return chain
 
 
-def _endpoint() -> tuple[str, str, dict[str, str]]:
+def endpoint() -> tuple[str, str, dict[str, str]]:
     """The PRIMARY provider (base_url, model, headers) — first item of the chain."""
-    return _provider_chain()[0]
+    return provider_chain()[0]
 
 
 def _vision_provider_chain() -> list[tuple[str, str, dict[str, str]]]:
@@ -255,7 +265,7 @@ def _vision_provider_chain() -> list[tuple[str, str, dict[str, str]]]:
     return chain
 
 
-def _vision_endpoint() -> tuple[str, str, dict[str, str]]:
+def vision_endpoint() -> tuple[str, str, dict[str, str]]:
     """The PRIMARY vision provider — first item of the vision chain."""
     return _vision_provider_chain()[0]
 
@@ -263,7 +273,7 @@ def _vision_endpoint() -> tuple[str, str, dict[str, str]]:
 # ============================================================================
 # Token-budget math for the Groq free tier.
 #
-# Groq's free llama-3.3-70b model is capped at 12,000 "tokens per minute"
+# Groq's free-tier text models are capped by a "tokens per minute"
 # (roughly word-parts). A request counts its INPUT length + the max_tokens we
 # ask for as OUTPUT against that rolling budget. So we compute how many output
 # tokens we can afford given the input size, and fail loudly if the input
@@ -275,7 +285,7 @@ TPM_BUDGET = 11000          # leave a little headroom under the 12,000 cap
 MAX_OUT_TOKENS = 5000       # biggest output we'll ever request
 
 
-def _fit_max_tokens(system: str, user: str, floor: int = 800) -> int:
+def fit_max_tokens(system: str, user: str, floor: int = 800) -> int:
     """How many output tokens may we request for this prompt?
 
     Rough input estimate: English is ~4 chars per token, so len(text)//4.

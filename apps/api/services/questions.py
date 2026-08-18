@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import json
 
+from llm import chat
 from schemas import Answer
-from services.text import _clamp_answers
+from services.text import clamp_answers
 
 SCREENSHOT_SYSTEM = (
     "You read application-form questions from screenshots and answer them for a job "
@@ -20,8 +21,41 @@ SCREENSHOT_SYSTEM = (
     "No markdown fences, no commentary."
 )
 
+# Text twin of SCREENSHOT_SYSTEM: the questions arrive as plain text (typed or
+# pasted), not screenshots. Same grounding contract, same JSON reply format.
+QUESTION_SYSTEM = (
+    "You answer application-form questions for a job candidate. Answer each question in "
+    "the candidate's voice, grounded ONLY in the candidate's resume and brag document "
+    "below — never invent experience, skills, or metrics. Keep answers to 1-4 specific, "
+    "honest sentences. "
+    'Reply with ONLY JSON: an array of objects, each {"question": "...", "answer": "..."}, '
+    "one per input question, in the same order. No markdown fences, no commentary."
+)
 
-def _screenshot_questions_prompt(master_tex: str, brag_text: str) -> tuple[str, str]:
+
+def answer_questions(
+    questions: list[str], master_tex: str, brag_text: str = ""
+) -> list[Answer]:
+    """Answer plain-text form questions from the resume + brag doc via the text model."""
+    system, user = questions_prompt(questions, master_tex, brag_text)
+    raw = chat(system, user, temperature=0.3, max_tokens=2500)
+    return parse_question_answers(raw)
+
+
+def questions_prompt(
+    questions: list[str], master_tex: str, brag_text: str
+) -> tuple[str, str]:
+    """Build the (system, user) prompt pair for answering typed questions."""
+    numbered = "\n".join(f"{i}. {q}" for i, q in enumerate(questions, 1))
+    user = (
+        f"RESUME:\n{master_tex}\n\n"
+        + (f"BRAG DOCUMENT:\n{brag_text}\n\n" if brag_text else "")
+        + f"QUESTIONS TO ANSWER:\n{numbered}"
+    )
+    return QUESTION_SYSTEM, user
+
+
+def screenshot_questions_prompt(master_tex: str, brag_text: str) -> tuple[str, str]:
     """Build the (system, user) prompt pair for the screenshot reader."""
     user = (
         f"RESUME:\n{master_tex}\n\n"
@@ -31,7 +65,7 @@ def _screenshot_questions_prompt(master_tex: str, brag_text: str) -> tuple[str, 
     return SCREENSHOT_SYSTEM, user
 
 
-def _parse_question_answers(raw: str) -> list[Answer]:
+def parse_question_answers(raw: str) -> list[Answer]:
     """Parse the model's raw text into a list of Answer objects. Returns [] on garbage.
 
     The model is asked for strict JSON, but models are chatty — they may wrap
@@ -59,4 +93,4 @@ def _parse_question_answers(raw: str) -> list[Answer]:
     for item in data:
         if isinstance(item, dict) and item.get("question") and item.get("answer"):
             rows.append(Answer(question=str(item["question"]), answer=str(item["answer"])))
-    return _clamp_answers(rows)     # enforce length caps
+    return clamp_answers(rows)     # enforce length caps

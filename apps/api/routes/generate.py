@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -16,10 +17,10 @@ from fastapi.responses import StreamingResponse
 from auth import require_service_user
 from llm import active_provider, vision_chat
 from schemas import Answer, GenerateRequest
-from services.pipeline import _generate_stream
-from services.questions import _parse_question_answers, _screenshot_questions_prompt
-from services.resume import _pick_cv
-from services.text import _clamp, _clamp_answers
+from services.pipeline import generate_stream
+from services.questions import parse_question_answers, screenshot_questions_prompt
+from services.resume import pick_cv
+from services.text import clamp, clamp_questions
 from store import brag_content, cv_content, get_brag, list_cvs
 from user_settings import get_links
 
@@ -30,23 +31,30 @@ MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024   # 5 MB per image
 
 
 @router.post("/api/generate")
-def api_generate(
+async def api_generate(
     req: GenerateRequest, _sv: Annotated[dict, Depends(require_service_user)]
 ) -> StreamingResponse:
     """Stream each generated artifact as an SSE event the moment it's ready."""
-    jd = _clamp(req.job_description, 6000)   # cap the JD length (input guard)
+    jd = clamp(req.job_description, 6000)   # cap the JD length (input guard)
     if not jd.strip():                        # .strip() removes spaces; empty = error
         raise HTTPException(400, "A job description is required.")
-    answers = _clamp_answers(req.answers)     # cap each answer's length
-    cvs = list_cvs(_sv["id"])
+    questions = clamp_questions(req.questions)   # trim the form questions
+
+    # The storage reads are independent (all key off the same user), so fetch
+    # them concurrently: CV list, brag doc, and profile links.
+    cvs_task = asyncio.create_task(asyncio.to_thread(list_cvs, _sv["id"]))
+    brag_task = asyncio.create_task(asyncio.to_thread(get_brag, _sv["id"]))
+    links_task = asyncio.create_task(asyncio.to_thread(get_links))
+
+    cvs = await cvs_task
     if not cvs:
         raise HTTPException(400, "Upload at least one master CV in Settings first.")
 
-    cv = _pick_cv(cvs, jd)   # pick the master CV best suited to this JD
+    cv = pick_cv(cvs, jd)   # pick the master CV best suited to this JD
 
     # Feedback always runs, so the master CV is always needed even if the user
     # only asked for a cover letter. Decode the .tex bytes to text.
-    master_tex = cv_content(cv).decode("utf-8", errors="replace")
+    master_tex = (await asyncio.to_thread(cv_content, cv)).decode("utf-8", errors="replace")
     # Guard: the resume job needs the model to swallow the whole CV. On Groq's
     # free tier a CV over ~18KB won't fit the token budget → explain up front.
     if "resume" in req.parts and active_provider() == "groq" and len(master_tex) > 18000:
@@ -56,23 +64,22 @@ def api_generate(
             "Split or simplify the .tex file, or add an OpenRouter key in Settings for no limits.",
         )
 
-    # Load the brag document text too (optional grounding material).
-    brag_text = ""
-    brag = get_brag(_sv["id"])
-    if brag:
-        brag_text = brag_content(brag)
+    # Collect the remaining reads that were already running concurrently.
+    brag = await brag_task
+    brag_text = brag_content(brag) if brag else ""
+    links = await links_task
 
-    # Return a StreamingResponse wrapping the async generator _generate_stream.
-    # The response is sent back immediately; _generate_stream then yields
+    # Return a StreamingResponse wrapping the async generator generate_stream.
+    # The response is sent back immediately; generate_stream then yields
     # events over time. media_type "text/event-stream" is the SSE MIME type.
     return StreamingResponse(
-        _generate_stream(
+        generate_stream(
             req,
             jd,
-            answers,
+            questions,
             cv["file_name"],
             _sv.get("name") or "",
-            get_links(),
+            links,
             brag_text,
             master_tex,
         ),
@@ -129,13 +136,13 @@ def api_screenshot_questions(
     cv = next((c for c in cvs if c["preferred"]), cvs[0])  # preferred CV, else first
     master_tex = cv_content(cv).decode("utf-8", errors="replace")
 
-    system, user = _screenshot_questions_prompt(master_tex, brag_text)
+    system, user = screenshot_questions_prompt(master_tex, brag_text)
     try:
         # Ask the vision model. Low temperature → grounded, consistent answers.
         raw = vision_chat(system, user, images, temperature=0.3, max_tokens=2500)
     except Exception as exc:
         raise HTTPException(502, str(exc)) from exc
-    out = _parse_question_answers(raw)
+    out = parse_question_answers(raw)
     if not out:
         raise HTTPException(
             502, "Model returned no usable questions/answers. Try clearer screenshots."

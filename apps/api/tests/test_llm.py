@@ -32,11 +32,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # import path to 
 # the request-scoped contextvar instead of touching a file.
 import user_settings  # noqa: E402
 from llm import (  # noqa: E402
-    _endpoint,
-    _provider_chain,
-    _vision_endpoint,
     active_provider,
     chat,
+    endpoint,
+    provider_chain,
+    vision_endpoint,
 )
 from user_settings import set_current_service_user  # noqa: E402
 
@@ -59,7 +59,7 @@ def test_endpoint_prefers_openrouter_when_key_saved(monkeypatch):
         lambda uid: {"id": uid, "openrouter_api_key": "sk-or-test"},
     )
     try:
-        base, model, _headers = _endpoint()
+        base, model, _headers = endpoint()
         assert base == "https://openrouter.ai/api/v1"
         assert model == "google/gemini-2.5-flash"
     finally:
@@ -74,9 +74,9 @@ def test_endpoint_falls_back_to_groq_without_key(monkeypatch):
         user_settings, "get_service_user", lambda uid: {"id": uid, "openrouter_api_key": ""}
     )
     try:
-        base, model, _headers = _endpoint()
+        base, model, _headers = endpoint()
         assert base == "https://api.groq.com/openai/v1"
-        assert model == "llama-3.3-70b-versatile"
+        assert model == "openai/gpt-oss-120b"
     finally:
         set_current_service_user(None)
 
@@ -91,7 +91,7 @@ def test_endpoint_prefers_gemini_when_key_saved(monkeypatch):
         lambda uid: {"id": uid, "gemini_api_key": "sk-gem-test"},
     )
     try:
-        base, model, headers = _endpoint()
+        base, model, headers = endpoint()
         assert base == "https://generativelanguage.googleapis.com/v1beta/openai"
         assert model == "gemini-3.6-flash"
         assert headers["Authorization"] == "Bearer sk-gem-test"
@@ -109,7 +109,7 @@ def test_gemini_outranks_openrouter(monkeypatch):
         lambda uid: {"id": uid, "gemini_api_key": "sk-gem", "openrouter_api_key": "sk-or"},
     )
     try:
-        base, model, _headers = _endpoint()
+        base, model, _headers = endpoint()
         assert base == "https://generativelanguage.googleapis.com/v1beta/openai"
         assert active_provider() == "gemini"
     finally:
@@ -125,7 +125,7 @@ def test_vision_endpoint_prefers_gemini(monkeypatch):
         lambda uid: {"id": uid, "gemini_api_key": "sk-gem", "openrouter_api_key": "sk-or"},
     )
     try:
-        base, model, _headers = _vision_endpoint()
+        base, model, _headers = vision_endpoint()
         assert base == "https://generativelanguage.googleapis.com/v1beta/openai"
         assert model == "gemini-3.6-flash"
     finally:
@@ -140,7 +140,7 @@ def test_vision_endpoint_raises_without_key(monkeypatch):
         user_settings, "get_service_user", lambda uid: {"id": uid, "openrouter_api_key": ""}
     )
     try:
-        _vision_endpoint()
+        vision_endpoint()
         raise AssertionError("expected RuntimeError")   # fail test if nothing was raised
     except RuntimeError:
         pass
@@ -225,6 +225,33 @@ def test_chat_fails_over_to_next_provider_on_quota(monkeypatch):
         set_current_service_user(None)
 
 
+def test_chat_fails_over_when_provider_returns_empty_content(monkeypatch):
+    """Gemini returns 200 but no usable text (its thinking budget can eat all of
+    max_tokens) → chat() must fail over to Groq instead of crashing on a missing
+    'content' key."""
+    set_current_service_user(1)
+    monkeypatch.setattr(
+        user_settings,
+        "get_service_user",
+        lambda uid: {"id": uid, "gemini_api_key": "sk-gem", "openrouter_api_key": ""},
+    )
+    client = _FakeClient(
+        {
+            "https://generativelanguage.googleapis.com/v1beta/openai": [
+                _FakeResponse(200, "")     # Gemini: 200 but no text
+            ],
+            "https://api.groq.com/openai/v1": [_FakeResponse(200, "from groq")],  # Groq: success
+        }
+    )
+    monkeypatch.setattr("llm.httpx.Client", lambda *a, **k: client)
+    monkeypatch.setattr("llm.time.sleep", lambda s: None)
+    try:
+        assert chat("sys", "user") == "from groq"
+        assert len(client.calls) == 2   # both providers were tried, in order
+    finally:
+        set_current_service_user(None)
+
+
 def test_chat_raises_when_all_providers_exhausted(monkeypatch):
     """Every provider is rate-limited → the request must FAIL (raise), not
     hang or silently return garbage."""
@@ -265,7 +292,7 @@ def test_provider_chain_orders_gemini_openrouter_groq(monkeypatch):
         lambda uid: {"id": uid, "gemini_api_key": "sk-gem", "openrouter_api_key": "sk-or"},
     )
     try:
-        chain = _provider_chain()
+        chain = provider_chain()
         assert [base for base, _, _ in chain] == [
             "https://generativelanguage.googleapis.com/v1beta/openai",
             "https://openrouter.ai/api/v1",

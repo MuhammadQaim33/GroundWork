@@ -35,7 +35,7 @@ export interface JobAnswer {
 
 export interface GenerateRequest {
   jobDescription: string;
-  answers: JobAnswer[];
+  questions: string[];
   coverLetterFormats: CoverLetterFormat[];
   parts?: GeneratePart[];
 }
@@ -49,6 +49,7 @@ export interface GeneratedFile {
 
 export type GenerateEvent =
   | { event: "used_master_cv"; data: { usedMasterCv: string } }
+  | { event: "questions_answered"; data: { answers: JobAnswer[] } }
   | { event: "resume"; data: GeneratedFile }
   | { event: "cover_letter_text"; data: { text: string } }
   | { event: "cover_letter_txt"; data: GeneratedFile }
@@ -308,6 +309,12 @@ function dispatchEvent(raw: RawSseEvent, onEvent: (ev: GenerateEvent) => void): 
         data: { usedMasterCv: (raw.data as { used_master_cv: string }).used_master_cv },
       });
       break;
+    case "questions_answered":
+      onEvent({
+        event: "questions_answered",
+        data: { answers: (raw.data as { answers: JobAnswer[] }).answers },
+      });
+      break;
     case "resume":
       onEvent({ event: "resume", data: mapFile(raw.data as ServerFile) });
       break;
@@ -381,7 +388,7 @@ export async function generateApplication(
     headers,
     body: JSON.stringify({
       job_description: req.jobDescription,
-      answers: req.answers,
+      questions: req.questions,
       cover_letter_formats: req.coverLetterFormats,
       parts: req.parts ?? ["resume", "cover_letter"],
     }),
