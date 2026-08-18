@@ -187,16 +187,22 @@ export default function GeneratePage() {
     <AuthGuard>
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold text-uber-black">Generate application</h1>
-        <p className="mt-1 text-sm text-uber-gray">
+        <div className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-black/5 px-3 py-1 text-sm font-bold uppercase tracking-widest">
+          <span className="h-2 w-2 rounded-full bg-brand animate-pulse" />
+          Generate
+        </div>
+        <h1 className="mt-4 font-jura text-3xl font-bold tracking-tighter sm:text-4xl">
+          Build your application
+        </h1>
+        <p className="mt-2 text-sm text-black/60">
           Paste a job description, add optional questions (the app answers them from your CV
           and brag doc), then generate a tailored resume, cover letter, and fit feedback. The
           resume is auto-matched from your master CVs.
         </p>
       </div>
 
-      <section className="rounded-lg border border-uber-line bg-background p-5">
-        <label htmlFor="job-description" className="block text-sm font-medium text-uber-black">
+      <section className="rounded-2xl border border-black/10 bg-white p-5 shadow-sm sm:p-6">
+        <label htmlFor="job-description" className="block text-[11px] font-bold uppercase tracking-widest text-black/45">
           Job description
         </label>
         <textarea
@@ -205,12 +211,12 @@ export default function GeneratePage() {
           onChange={(e) => setJobDescription(e.target.value)}
           placeholder="Paste the job posting here…"
           rows={8}
-          className="mt-2 w-full resize-y rounded-md border border-uber-line bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-uber-green"
+          className="mt-2 w-full resize-y rounded-lg border border-black/10 bg-white px-3 py-2.5 text-sm placeholder:text-black/35 focus:border-black/40 focus:outline-none"
         />
       </section>
 
-      <section className="rounded-lg border border-uber-line bg-background p-5 lg:sticky lg:top-4">
-        <h2 className="text-sm font-medium text-uber-black">Generate</h2>
+      <section className="rounded-2xl border border-black/10 bg-white p-5 shadow-sm sm:p-6 lg:sticky lg:top-4">
+        <h2 className="font-jura text-sm font-bold uppercase tracking-widest">Generate</h2>
         <div className="mt-3 flex flex-wrap gap-2">
           {TOGGLES.map((t) => (
             <button
@@ -218,10 +224,10 @@ export default function GeneratePage() {
               type="button"
               onClick={() => toggle(t.key)}
               aria-pressed={toggles[t.key]}
-              className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors ${
+              className={`rounded-lg px-3 py-1.5 text-xs font-bold uppercase tracking-widest transition-all ${
                 toggles[t.key]
-                  ? "border-uber-black bg-uber-black text-white"
-                  : "border-uber-line bg-uber-bg text-uber-gray hover:text-uber-black"
+                  ? "bg-black text-white"
+                  : "border border-black/10 text-black/55 hover:bg-black/5 hover:text-black"
               }`}
             >
               {t.label}
@@ -233,7 +239,7 @@ export default function GeneratePage() {
           type="button"
           onClick={onGenerate}
           disabled={generating}
-          className="mt-4 w-full rounded-md bg-uber-black px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-uber-green disabled:cursor-not-allowed disabled:opacity-50"
+          className="mt-4 w-full rounded-lg bg-black px-4 py-3 text-sm font-bold uppercase tracking-widest text-white transition-all hover:bg-black/80 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {generating ? "Generating…" : "Generate"}
         </button>
@@ -254,13 +260,13 @@ export default function GeneratePage() {
           <div className="mt-4 flex flex-col gap-3">
             {rating !== null && <MatchRating rating={rating} />}
             {hasResults && (
-              <div className="rounded-md border border-uber-green bg-uber-green-soft p-4">
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-50 p-4">
                 <div className="flex items-center gap-2">
-                  <span className="inline-block h-2.5 w-2.5 rounded-full bg-uber-green" />
-                  <h3 className="text-sm font-semibold text-uber-green-dark">Ready — review and download</h3>
+                  <span className="inline-block h-2.5 w-2.5 rounded-full bg-brand" />
+                  <h3 className="text-sm font-semibold text-emerald-700">Ready — review and download</h3>
                 </div>
                 {usedMasterCv && (
-                  <p className="mt-1 text-xs text-uber-gray">Master CV matched: {usedMasterCv}</p>
+                  <p className="mt-1 text-xs text-black/50">Master CV matched: {usedMasterCv}</p>
                 )}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   {resume && <Artifact file={resume} label="Custom resume" />}
@@ -273,22 +279,22 @@ export default function GeneratePage() {
         )}
       </section>
 
-      <section className="rounded-lg border border-uber-line bg-background p-5">
+      <section className="rounded-2xl border border-black/10 bg-white p-5 shadow-sm sm:p-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium text-uber-black">Optional questions</h2>
+          <h2 className="font-jura text-sm font-bold uppercase tracking-widest">Optional questions</h2>
           <div className="flex items-center gap-2">
             {questionsProvider && <ProviderBadge provider={questionsProvider} />}
             <button
               type="button"
               onClick={addRow}
-              className="rounded-md bg-uber-black px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-uber-green"
+              className="rounded-lg bg-black px-3 py-1.5 text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-black/80 active:scale-[0.98]"
             >
               + Add question
             </button>
           </div>
         </div>
         <div className="mt-3 flex flex-col gap-3">
-          {rows.length === 0 && <p className="text-sm text-uber-gray">No questions yet — e.g. “Why do you want to work here?”</p>}
+          {rows.length === 0 && <p className="text-sm text-black/50">No questions yet — e.g. “Why do you want to work here?”</p>}
           {rows.map((row) => (
             <div key={row.id} className="flex flex-col gap-2">
               <div className="flex items-start gap-2">
@@ -296,27 +302,27 @@ export default function GeneratePage() {
                   value={row.question}
                   onChange={(e) => updateRow(row.id, { question: e.target.value })}
                   placeholder="Question"
-                  className="w-full rounded-md border border-uber-line bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-uber-green"
+                  className="w-full rounded-lg border border-black/10 bg-white px-3 py-2.5 text-sm placeholder:text-black/35 focus:border-black/40 focus:outline-none"
                 />
                 <button
                   type="button"
                   onClick={() => removeRow(row.id)}
                   aria-label="Remove question"
-                  className="rounded-md px-2 py-2 text-uber-gray transition-colors hover:bg-uber-green-soft hover:text-uber-green-dark"
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-black/10 text-black/50 transition-all hover:border-black hover:text-black"
                 >
                   ✕
                 </button>
               </div>
               {row.answer && (
-                <p className="rounded-md bg-uber-green-soft px-3 py-2 text-sm text-uber-black">
+                <p className="rounded-lg border border-black/5 bg-black/[0.02] px-3 py-2 text-sm text-black/80">
                   {row.answer}
                 </p>
               )}
             </div>
           ))}
         </div>
-        <div className="mt-4 border-t border-uber-line pt-4">
-          <p className="text-xs text-uber-gray">
+        <div className="mt-4 border-t border-black/10 pt-4">
+          <p className="text-xs text-black/50">
             Got the questions as a screenshot? Upload the image(s) and the model will answer
             each question into the list above (uses your OpenRouter key; images are not saved).
           </p>
@@ -326,13 +332,13 @@ export default function GeneratePage() {
               accept="image/*"
               multiple
               onChange={(e) => setScreenshotFiles(Array.from(e.target.files ?? []))}
-              className="text-sm text-uber-gray"
+              className="text-sm text-black/50"
             />
             <button
               type="button"
               onClick={extractFromScreenshots}
               disabled={extracting || screenshotFiles.length === 0}
-              className="rounded-md bg-uber-black px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-uber-green disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-lg bg-black px-3 py-1.5 text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-black/80 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {extracting ? "Extracting…" : "Extract questions & answers"}
             </button>
@@ -344,33 +350,33 @@ export default function GeneratePage() {
       </section>
 
       {letterText !== null && (
-        <section className="rounded-lg border border-uber-line bg-background p-5">
+        <section className="rounded-2xl border border-black/10 bg-white p-5 shadow-sm sm:p-6">
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-medium text-uber-black">Cover letter preview</h2>
+            <h2 className="font-jura text-sm font-bold uppercase tracking-widest">Cover letter preview</h2>
             <ProviderBadge provider={letterTextProvider} />
             <CopyButton text={letterText} />
           </div>
-          <pre className="mt-3 whitespace-pre-wrap rounded-md border border-uber-line bg-white p-4 text-sm">
+          <pre className="mt-3 whitespace-pre-wrap rounded-xl border border-black/10 bg-white p-4 text-sm">
             {letterText}
           </pre>
         </section>
       )}
 
       {feedback !== null && (
-        <section className="rounded-lg border border-uber-line bg-background p-5">
+        <section className="rounded-2xl border border-black/10 bg-white p-5 shadow-sm sm:p-6">
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-medium text-uber-black">Feedback</h2>
+            <h2 className="font-jura text-sm font-bold uppercase tracking-widest">Feedback</h2>
             <ProviderBadge provider={feedbackProvider} />
           </div>
-          <div className="mt-3 rounded-md border border-uber-line bg-white p-4">
-            <ul className="space-y-2.5 text-sm text-uber-black">
+          <div className="mt-3 rounded-xl border border-black/10 bg-white p-4">
+            <ul className="space-y-2.5 text-sm text-black/80">
               {feedback
                 .split("\n")
                 .map((l) => l.trim())
                 .filter(Boolean)
                 .map((line, i) => (
                   <li key={i} className="flex items-start gap-2.5">
-                    <span className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-uber-green" />
+                    <span className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
                     <span className="flex-1">{line.replace(/^[-•*]\s*/, "")}</span>
                   </li>
                 ))}
@@ -403,7 +409,7 @@ function CopyButton({ text }: { text: string }) {
       onClick={handleClick}
       aria-label="Copy to clipboard"
       title={copied ? "Copied" : "Copy to clipboard"}
-      className="ml-auto rounded-md border border-uber-line px-2 py-1.5 text-uber-gray transition-colors hover:border-uber-green hover:text-uber-green-dark"
+      className="ml-auto grid h-9 w-9 place-items-center rounded-full border border-black/10 text-black/60 transition-all hover:border-black hover:text-black"
     >
       <svg
         viewBox="0 0 24 24"
@@ -435,18 +441,18 @@ function MatchRating({ rating }: { rating: number }) {
   const tone =
     score >= 8
       ? {
-          badge: "bg-uber-green",
-          bar: "bg-uber-green",
-          border: "border-uber-green",
-          soft: "bg-uber-green-soft",
-          text: "text-uber-green-dark",
+          badge: "bg-emerald-500",
+          bar: "bg-emerald-500",
+          border: "border-emerald-500/30",
+          soft: "bg-emerald-50",
+          text: "text-emerald-700",
           label: "Strong match",
         }
       : score >= 5
         ? {
             badge: "bg-amber-500",
             bar: "bg-amber-500",
-            border: "border-amber-400",
+            border: "border-amber-400/40",
             soft: "bg-amber-50",
             text: "text-amber-700",
             label: "Partial match",
@@ -454,13 +460,13 @@ function MatchRating({ rating }: { rating: number }) {
         : {
             badge: "bg-red-500",
             bar: "bg-red-500",
-            border: "border-red-400",
+            border: "border-red-400/40",
             soft: "bg-red-50",
             text: "text-red-700",
             label: "Weak match",
           };
   return (
-    <div className={`flex items-center gap-4 rounded-xl border-2 p-5 ${tone.border} ${tone.soft}`}>
+    <div className={`flex items-center gap-4 rounded-2xl border bg-white p-5 ${tone.border} ${tone.soft}`}>
       <div
         className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-white ${tone.badge} shadow-lg ring-4 ring-white`}
       >
@@ -480,14 +486,14 @@ function MatchRating({ rating }: { rating: number }) {
         </svg>
       </div>
       <div className="min-w-0 flex-1">
-        <p className={`text-xs font-semibold uppercase tracking-wider ${tone.text}`}>
+        <p className={`text-[11px] font-bold uppercase tracking-widest ${tone.text}`}>
           Job match · {tone.label}
         </p>
         <div className="mt-1 flex items-baseline gap-1.5">
-          <span className={`text-5xl font-bold leading-none ${tone.text}`}>{score}</span>
-          <span className="text-base font-medium text-uber-gray">/ 10</span>
+          <span className={`font-jura text-5xl font-bold leading-none ${tone.text}`}>{score}</span>
+          <span className="text-base font-medium text-black/50">/ 10</span>
         </div>
-        <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-black/10">
+        <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-black/5">
           <div
             className={`h-full rounded-full ${tone.bar}`}
             style={{ width: `${score * 10}%` }}
@@ -533,7 +539,7 @@ function DownloadButton({ file, label }: { file: GeneratedFile; label: string })
       type="button"
       onClick={handleClick}
       disabled={busy}
-      className="rounded-md bg-uber-green px-4 py-2 text-sm font-semibold text-uber-black transition-colors hover:bg-uber-green-dark hover:text-white disabled:opacity-50"
+      className="rounded-lg border border-black/10 px-4 py-2 text-xs font-bold uppercase tracking-widest text-black/70 transition-all hover:bg-black/5 hover:text-black disabled:opacity-50"
     >
       {busy ? "Fetching…" : `${label} · ${file.kind.toUpperCase()}`}
     </button>
@@ -566,7 +572,7 @@ function ProviderBadge({ provider, model }: { provider?: string; model?: string 
   return (
     <span
       title={model ? `Rendered by ${model}` : undefined}
-      className={`inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium ${style}`}
+      className={`inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-widest ${style}`}
     >
       {label}
     </span>

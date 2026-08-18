@@ -170,17 +170,21 @@ export default function SettingsPage() {
     <AuthGuard>
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold text-uber-black">Settings</h1>
-        <p className="mt-1 text-sm text-uber-gray">
+        <div className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-black/5 px-3 py-1 text-sm font-bold uppercase tracking-widest">
+          <span className="h-2 w-2 rounded-full bg-brand animate-pulse" />
+          Configure
+        </div>
+        <h1 className="mt-4 font-jura text-3xl font-bold tracking-tighter sm:text-4xl">Settings</h1>
+        <p className="mt-2 text-sm text-black/60">
           Manage the source materials the generator works from. Uploads live in Supabase Storage;
           the API compiles fine-tuned PDFs locally with tectonic.
         </p>
       </div>
 
-      <section className="rounded-lg border border-uber-line bg-background p-5">
+      <section className="rounded-2xl border border-black/10 bg-white p-5 shadow-sm sm:p-6">
         <div>
-          <h2 className="text-sm font-medium text-uber-black">AI provider</h2>
-          <p className="mt-0.5 text-xs text-uber-gray">
+          <h2 className="border-l-2 border-black pl-3 font-jura text-sm font-bold uppercase tracking-widest">AI provider</h2>
+          <p className="mt-2 text-xs text-black/50">
             Generations run on the free Groq tier by default. Adding a free Google AI
             Studio (Gemini) key upgrades both generation and screenshot questions to
             Gemini with no credit costs; your OpenRouter key is the paid fallback. Keys
@@ -196,13 +200,13 @@ export default function SettingsPage() {
             placeholder={
               llm?.geminiKeySet ? "Replace saved Gemini key" : "Gemini API key (free, from AI Studio)"
             }
-            className="w-full max-w-sm rounded-md border border-uber-line px-3 py-1.5 text-sm text-uber-black outline-none focus:border-uber-green"
+            className="w-full max-w-sm rounded-lg border border-black/10 px-3 py-2.5 text-sm text-black outline-none transition-colors focus:border-black/40"
           />
           <button
             type="button"
             onClick={onSaveGeminiKey}
             disabled={busy || !geminiInput.trim()}
-            className="rounded-md bg-uber-black px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-uber-green disabled:opacity-50"
+            className="rounded-lg bg-black px-3 py-2.5 text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-black/80 active:scale-[0.98] disabled:opacity-50"
           >
             Save Gemini key
           </button>
@@ -216,22 +220,22 @@ export default function SettingsPage() {
             placeholder={
               llm?.openrouterKeySet ? "Replace saved key (starts sk-or-…)" : "OpenRouter key (sk-or-…)"
             }
-            className="w-full max-w-sm rounded-md border border-uber-line px-3 py-1.5 text-sm text-uber-black outline-none focus:border-uber-green"
+            className="w-full max-w-sm rounded-lg border border-black/10 px-3 py-2.5 text-sm text-black outline-none transition-colors focus:border-black/40"
           />
           <button
             type="button"
             onClick={onSaveKey}
             disabled={busy || !keyInput.trim()}
-            className="rounded-md bg-uber-black px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-uber-green disabled:opacity-50"
+            className="rounded-lg bg-black px-3 py-2.5 text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-black/80 active:scale-[0.98] disabled:opacity-50"
           >
             Save OpenRouter key
           </button>
         </div>
 
         {llmError && <p className="mt-3 text-sm font-medium text-red-600">{llmError}</p>}
-        {llmSaved && <p className="mt-3 text-sm font-medium text-uber-green-dark">Key saved.</p>}
+        {llmSaved && <p className="mt-3 text-sm font-medium text-emerald-700">Key saved.</p>}
         {loaded && llm && (
-          <p className="mt-3 text-xs text-uber-gray">
+          <p className="mt-3 text-xs text-black/50">
             Active provider:{" "}
             {llm.provider === "gemini"
               ? "Gemini (free)"
@@ -244,16 +248,16 @@ export default function SettingsPage() {
         )}
       </section>
 
-      <section className="rounded-lg border border-uber-line bg-background p-5">
+      <section className="rounded-2xl border border-black/10 bg-white p-5 shadow-sm sm:p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-medium text-uber-black">Master CVs</h2>
-            <p className="mt-0.5 text-xs text-uber-gray">
+            <h2 className="border-l-2 border-black pl-3 font-jura text-sm font-bold uppercase tracking-widest">Master CVs</h2>
+            <p className="mt-2 text-xs text-black/50">
               LaTeX (.tex) versions of your CV. The generator auto-picks one from the job
               description; the preferred mark breaks ties.
             </p>
           </div>
-          <label className="cursor-pointer rounded-md bg-uber-black px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-uber-green disabled:opacity-50">
+          <label className="cursor-pointer rounded-lg bg-black px-3 py-2 text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-black/80 active:scale-[0.98] disabled:opacity-50">
             + Upload .tex
             <input type="file" accept=".tex" className="hidden" onChange={onCvUpload} disabled={busy} />
           </label>
@@ -262,22 +266,22 @@ export default function SettingsPage() {
         {cvError && <p className="mt-3 text-sm font-medium text-red-600">{cvError}</p>}
 
         <ul className="mt-4 flex flex-col gap-2">
-          {loaded && cvs.length === 0 && <li className="text-sm text-uber-gray">No master CVs yet.</li>}
+          {loaded && cvs.length === 0 && <li className="text-sm text-black/50">No master CVs yet.</li>}
           {cvs.map((cv) => (
             <li
               key={cv.id}
-              className="flex items-center justify-between gap-3 rounded-md border border-uber-line px-3 py-2"
+              className="flex items-center justify-between gap-3 rounded-xl border border-black/10 bg-white px-3 py-2.5"
             >
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-uber-black">
+                <p className="truncate text-sm font-medium text-black">
                   {cv.name}
                   {cv.preferred && (
-                    <span className="ml-2 rounded bg-uber-green-soft px-1.5 py-0.5 text-xs font-semibold text-uber-green-dark">
+                    <span className="ml-2 rounded-full border border-emerald-500/30 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest text-emerald-700">
                       Preferred
                     </span>
                   )}
                 </p>
-                <p className="text-xs text-uber-gray">
+                <p className="text-xs text-black/50">
                   Uploaded {new Date(cv.uploadedAt).toLocaleDateString()}
                 </p>
               </div>
@@ -296,7 +300,7 @@ export default function SettingsPage() {
                         setBusy(false);
                       }
                     }}
-                    className="rounded-md border border-uber-line px-2 py-1 text-xs font-medium text-uber-black transition-colors hover:border-uber-green hover:text-uber-green-dark"
+                    className="rounded-lg border border-black/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-black/70 transition-all hover:border-black hover:text-black"
                   >
                     Preferred
                   </button>
@@ -314,7 +318,7 @@ export default function SettingsPage() {
                       setBusy(false);
                     }
                   }}
-                  className="rounded-md px-2 py-1 text-xs font-medium text-uber-gray transition-colors hover:bg-uber-green-soft hover:text-uber-green-dark"
+                  className="rounded-lg px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-black/50 transition-colors hover:bg-black/5 hover:text-black"
                 >
                   Remove
                 </button>
@@ -324,15 +328,15 @@ export default function SettingsPage() {
         </ul>
       </section>
 
-      <section className="rounded-lg border border-uber-line bg-background p-5">
+      <section className="rounded-2xl border border-black/10 bg-white p-5 shadow-sm sm:p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-medium text-uber-black">Brag document</h2>
-            <p className="mt-0.5 text-xs text-uber-gray">
+            <h2 className="border-l-2 border-black pl-3 font-jura text-sm font-bold uppercase tracking-widest">Brag document</h2>
+            <p className="mt-2 text-xs text-black/50">
               Markdown notes of wins, metrics, and stories used to fine-tune the chosen CV. Optional.
             </p>
           </div>
-          <label className="cursor-pointer rounded-md bg-uber-black px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-uber-green">
+          <label className="cursor-pointer rounded-lg bg-black px-3 py-2 text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-black/80 active:scale-[0.98]">
             + Upload .md
             <input type="file" accept=".md" className="hidden" onChange={onBragUpload} disabled={busy} />
           </label>
@@ -341,10 +345,10 @@ export default function SettingsPage() {
         {bragError && <p className="mt-3 text-sm font-medium text-red-600">{bragError}</p>}
 
         {loaded && brag ? (
-          <div className="mt-4 flex items-center justify-between gap-3 rounded-md border border-uber-line px-3 py-2">
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-black/10 bg-white px-3 py-2.5">
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-uber-black">{brag.name}</p>
-              <p className="text-xs text-uber-gray">
+              <p className="truncate text-sm font-medium text-black">{brag.name}</p>
+              <p className="text-xs text-black/50">
                 Uploaded {new Date(brag.uploadedAt).toLocaleDateString()}
               </p>
             </div>
@@ -361,21 +365,21 @@ export default function SettingsPage() {
                   setBusy(false);
                 }
               }}
-              className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-uber-gray transition-colors hover:bg-uber-green-soft hover:text-uber-green-dark"
+              className="shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-bold uppercase tracking-widest text-black/50 transition-colors hover:bg-black/5 hover:text-black"
             >
               Remove
             </button>
           </div>
         ) : (
-          loaded && <p className="mt-4 text-sm text-uber-gray">No brag document yet — optional.</p>
+          loaded && <p className="mt-4 text-sm text-black/50">No brag document yet — optional.</p>
         )}
       </section>
 
-      <section className="rounded-lg border border-uber-line bg-background p-5">
+      <section className="rounded-2xl border border-black/10 bg-white p-5 shadow-sm sm:p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-medium text-uber-black">Links</h2>
-            <p className="mt-0.5 text-xs text-uber-gray">
+            <h2 className="border-l-2 border-black pl-3 font-jura text-sm font-bold uppercase tracking-widest">Links</h2>
+            <p className="mt-2 text-xs text-black/50">
               Any number of links you want the generator to know about — GitHub, LinkedIn, or
               portfolio. Saved to your profile.
             </p>
@@ -383,7 +387,7 @@ export default function SettingsPage() {
           <button
             type="button"
             onClick={addLinkRow}
-            className="rounded-md bg-uber-black px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-uber-green"
+            className="rounded-lg bg-black px-3 py-2 text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-black/80 active:scale-[0.98]"
           >
             + Add link
           </button>
@@ -391,7 +395,7 @@ export default function SettingsPage() {
 
         <div className="mt-3 flex flex-col gap-3">
           {loaded && linkRows.length === 0 && (
-            <p className="text-sm text-uber-gray">No links yet — e.g. github.com/you, linkedin.com/in/you.</p>
+            <p className="text-sm text-black/50">No links yet — e.g. github.com/you, linkedin.com/in/you.</p>
           )}
           {linkRows.map((row) => (
             <div key={row.id} className="flex items-start gap-2">
@@ -399,13 +403,13 @@ export default function SettingsPage() {
                 value={row.value}
                 onChange={(e) => updateLinkRow(row.id, e.target.value)}
                 placeholder="https://…"
-                className="flex-1 rounded-md border border-uber-line bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-uber-green"
+                className="flex-1 rounded-lg border border-black/10 bg-white px-3 py-2.5 text-sm placeholder:text-black/35 focus:border-black/40 focus:outline-none"
               />
               <button
                 type="button"
                 onClick={() => removeLinkRow(row.id)}
                 aria-label="Remove link"
-                className="rounded-md px-2 py-2 text-uber-gray transition-colors hover:bg-uber-green-soft hover:text-uber-green-dark"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-black/10 text-black/50 transition-all hover:border-black hover:text-black"
               >
                 ✕
               </button>
@@ -418,12 +422,12 @@ export default function SettingsPage() {
             type="button"
             onClick={onSaveLinks}
             disabled={busy}
-            className="rounded-md bg-uber-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-uber-green disabled:opacity-50"
+            className="rounded-lg bg-black px-4 py-2.5 text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-black/80 active:scale-[0.98] disabled:opacity-50"
           >
             Save links
           </button>
           {linkError && <p className="text-sm font-medium text-red-600">{linkError}</p>}
-          {linksSaved && <p className="text-sm font-medium text-uber-green-dark">Links saved.</p>}
+          {linksSaved && <p className="text-sm font-medium text-emerald-700">Links saved.</p>}
         </div>
       </section>
     </div>

@@ -1,32 +1,30 @@
 @import "tailwindcss";
 
-:root {
-  --color-uber-black: #000000;
-  --color-uber-green: #06c167;
-  --color-uber-green-dark: #04954f;
-  --color-uber-green-soft: #e7fbef;
-  --color-uber-gray: #7a7a7a;
-  --color-uber-line: #e5e5e5;
-  --color-uber-bg: #f5f5f5;
+@theme inline {
+  --color-brand: #10b981;
   --color-foreground: #000000;
   --color-background: #ffffff;
-}
-
-@theme inline {
-  --color-uber-black: var(--color-uber-black);
-  --color-uber-green: var(--color-uber-green);
-  --color-uber-green-dark: var(--color-uber-green-dark);
-  --color-uber-green-soft: var(--color-uber-green-soft);
-  --color-uber-gray: var(--color-uber-gray);
-  --color-uber-line: var(--color-uber-line);
-  --color-uber-bg: var(--color-uber-bg);
-  --color-foreground: var(--color-foreground);
-  --color-background: var(--color-background);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-jura: var(--font-jura-src);
+  --font-puritan: var(--font-puritan-src);
 }
 
 body {
-  background: var(--color-uber-bg);
+  background: var(--color-background);
   color: var(--color-foreground);
+}
+
+/* Signature dionix.ai texture: 1px grid hairlines (24px cell). */
+.bg-grid-hairline {
+  background-image:
+    linear-gradient(to right, #80808008 1px, transparent 1px),
+    linear-gradient(to bottom, #80808008 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Soft radial glow orb used behind auth cards. */
+.orb {
+  border-radius: 9999px;
+  background-color: rgb(0 0 0 / 0.05);
+  filter: blur(120px);
+  pointer-events: none;
 }

@@ -11,13 +11,16 @@ export default function HeaderNav() {
 
   if (!session) {
     return (
-      <div className="flex items-center gap-4 text-sm font-medium">
-        <Link href="/login" className="text-white/80 transition-colors hover:text-white">
+      <div className="flex items-center gap-6">
+        <Link
+          href="/login"
+          className="text-xs font-bold uppercase tracking-widest text-black/70 transition-colors hover:text-black"
+        >
           Sign in
         </Link>
         <Link
           href="/signup"
-          className="rounded-md bg-uber-green px-3 py-1.5 font-semibold text-uber-black transition-colors hover:bg-uber-green-dark hover:text-white"
+          className="rounded-lg bg-black px-5 py-2 text-xs font-bold uppercase tracking-widest text-white transition-all hover:bg-black/80 active:scale-[0.98]"
         >
           Sign up
         </Link>
@@ -32,17 +35,23 @@ export default function HeaderNav() {
   }
 
   return (
-    <div className="flex items-center gap-6 text-sm font-medium">
-      <Link href="/generate" className="text-white/80 transition-colors hover:text-white">
+    <div className="flex items-center gap-6">
+      <Link
+        href="/generate"
+        className="text-xs font-bold uppercase tracking-widest text-black/70 transition-colors hover:text-black"
+      >
         Generate
       </Link>
-      <Link href="/settings" className="text-white/80 transition-colors hover:text-white">
+      <Link
+        href="/settings"
+        className="text-xs font-bold uppercase tracking-widest text-black/70 transition-colors hover:text-black"
+      >
         Settings
       </Link>
       <button
         type="button"
         onClick={onSignOut}
-        className="text-white/80 transition-colors hover:text-white"
+        className="text-xs font-bold uppercase tracking-widest text-black/50 transition-colors hover:text-black"
       >
         Sign out
       </button>

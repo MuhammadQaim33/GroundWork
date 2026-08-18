@@ -45,16 +45,18 @@ export interface GeneratedFile {
   kind: "pdf" | "text";
   url?: string;
   text?: string;
+  provider?: string;
+  model?: string;
 }
 
 export type GenerateEvent =
   | { event: "used_master_cv"; data: { usedMasterCv: string } }
-  | { event: "questions_answered"; data: { answers: JobAnswer[] } }
+  | { event: "questions_answered"; data: { answers: JobAnswer[]; provider?: string; model?: string } }
   | { event: "resume"; data: GeneratedFile }
-  | { event: "cover_letter_text"; data: { text: string } }
+  | { event: "cover_letter_text"; data: { text: string; provider?: string; model?: string } }
   | { event: "cover_letter_txt"; data: GeneratedFile }
   | { event: "cover_letter_pdf"; data: GeneratedFile }
-  | { event: "feedback"; data: { rating: number | null; text: string } }
+  | { event: "feedback"; data: { rating: number | null; text: string; provider?: string; model?: string } }
   | { event: "error"; data: { message: string; part?: string } }
   | { event: "done"; data: null };
 
@@ -82,6 +84,8 @@ interface ServerFile {
   kind: "pdf" | "text";
   url: string | null;
   text?: string;
+  provider?: string;
+  model?: string;
 }
 
 interface ServerAuthResult {
@@ -298,6 +302,8 @@ function mapFile(f: ServerFile): GeneratedFile {
     kind: f.kind,
     url: f.url ? absolute(f.url) : undefined,
     text: f.text,
+    provider: f.provider,
+    model: f.model,
   };
 }
 
@@ -309,18 +315,25 @@ function dispatchEvent(raw: RawSseEvent, onEvent: (ev: GenerateEvent) => void): 
         data: { usedMasterCv: (raw.data as { used_master_cv: string }).used_master_cv },
       });
       break;
-    case "questions_answered":
+    case "questions_answered": {
+      const q = raw.data as { answers: JobAnswer[]; provider?: string; model?: string };
       onEvent({
         event: "questions_answered",
-        data: { answers: (raw.data as { answers: JobAnswer[] }).answers },
+        data: { answers: q.answers, provider: q.provider, model: q.model },
       });
       break;
+    }
     case "resume":
       onEvent({ event: "resume", data: mapFile(raw.data as ServerFile) });
       break;
-    case "cover_letter_text":
-      onEvent({ event: "cover_letter_text", data: { text: (raw.data as { text: string }).text } });
+    case "cover_letter_text": {
+      const t = raw.data as { text: string; provider?: string; model?: string };
+      onEvent({
+        event: "cover_letter_text",
+        data: { text: t.text, provider: t.provider, model: t.model },
+      });
       break;
+    }
     case "cover_letter_txt":
       onEvent({ event: "cover_letter_txt", data: mapFile(raw.data as ServerFile) });
       break;
@@ -328,8 +341,11 @@ function dispatchEvent(raw: RawSseEvent, onEvent: (ev: GenerateEvent) => void): 
       onEvent({ event: "cover_letter_pdf", data: mapFile(raw.data as ServerFile) });
       break;
     case "feedback": {
-      const f = raw.data as { rating?: number | null; text: string };
-      onEvent({ event: "feedback", data: { rating: f.rating ?? null, text: f.text } });
+      const f = raw.data as { rating?: number | null; text: string; provider?: string; model?: string };
+      onEvent({
+        event: "feedback",
+        data: { rating: f.rating ?? null, text: f.text, provider: f.provider, model: f.model },
+      });
       break;
     }
     case "error": {
@@ -343,10 +359,14 @@ function dispatchEvent(raw: RawSseEvent, onEvent: (ev: GenerateEvent) => void): 
   }
 }
 
-async function readSSE(body: ReadableStream<Uint8Array>, onRaw: (ev: RawSseEvent) => void): Promise<void> {
+async function readSSE(
+  body: ReadableStream<Uint8Array>,
+  onRaw: (ev: RawSseEvent) => void
+): Promise<boolean> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let sawDone = false;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -361,6 +381,7 @@ async function readSSE(body: ReadableStream<Uint8Array>, onRaw: (ev: RawSseEvent
         if (line.startsWith("event:")) event = line.slice(6).trim();
         else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
       }
+      if (event === "done") sawDone = true;
       if (dataLines.length > 0) {
         let data: unknown = null;
         try {
@@ -373,6 +394,7 @@ async function readSSE(body: ReadableStream<Uint8Array>, onRaw: (ev: RawSseEvent
       sep = buffer.indexOf("\n\n");
     }
   }
+  return sawDone;
 }
 
 export async function generateApplication(
@@ -415,5 +437,13 @@ export async function generateApplication(
     throw new Error(detail);
   }
 
-  await readSSE(res.body, (raw) => dispatchEvent(raw, onEvent));
+  const sawDone = await readSSE(res.body, (raw) => dispatchEvent(raw, onEvent));
+  // The backend always ends a healthy stream with a "done" event. If the
+  // connection closed without it, something died mid-stream (a provider error
+  // usually) — say so instead of silently showing partial results.
+  if (!sawDone) {
+    throw new Error(
+      "Generation ended unexpectedly — some parts may be missing. Check your LLM provider (Gemini/OpenRouter key) and try again."
+    );
+  }
 }
