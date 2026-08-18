@@ -36,9 +36,13 @@ export default function GeneratePage() {
   const [coverLetterPdf, setCoverLetterPdf] = useState<GeneratedFile | null>(null);
   const [coverLetterTxt, setCoverLetterTxt] = useState<GeneratedFile | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [partErrors, setPartErrors] = useState<string[]>([]);
   const [letterText, setLetterText] = useState<string | null>(null);
+  const [letterTextProvider, setLetterTextProvider] = useState<string | undefined>(undefined);
   const [rating, setRating] = useState<number | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [feedbackProvider, setFeedbackProvider] = useState<string | undefined>(undefined);
+  const [questionsProvider, setQuestionsProvider] = useState<string | undefined>(undefined);
   const [usedMasterCv, setUsedMasterCv] = useState<string | null>(null);
   const [screenshotFiles, setScreenshotFiles] = useState<File[]>([]);
   const [extracting, setExtracting] = useState(false);
@@ -100,13 +104,17 @@ export default function GeneratePage() {
     if (toggles.resume) parts.push("resume");
     if (formats.length > 0) parts.push("cover_letter");
     setError(null);
+    setPartErrors([]);
     setGenerating(true);
     setResume(null);
     setCoverLetterPdf(null);
     setCoverLetterTxt(null);
     setLetterText(null);
+    setLetterTextProvider(undefined);
     setRating(null);
     setFeedback(null);
+    setFeedbackProvider(undefined);
+    setQuestionsProvider(undefined);
     setUsedMasterCv(null);
     try {
       const req: GenerateRequest = {
@@ -126,6 +134,7 @@ export default function GeneratePage() {
             const byQuestion = new Map(
               ev.data.answers.map((a) => [a.question.trim().toLowerCase(), a.answer])
             );
+            setQuestionsProvider(ev.data.provider);
             setRows((r) =>
               r.map((row) =>
                 byQuestion.has(row.question.trim().toLowerCase())
@@ -140,6 +149,7 @@ export default function GeneratePage() {
             break;
           case "cover_letter_text":
             setLetterText(ev.data.text);
+            setLetterTextProvider(ev.data.provider);
             break;
           case "cover_letter_txt":
             setCoverLetterTxt(ev.data);
@@ -150,9 +160,16 @@ export default function GeneratePage() {
           case "feedback":
             setRating(ev.data.rating);
             setFeedback(ev.data.text);
+            setFeedbackProvider(ev.data.provider);
             break;
           case "error":
-            setError(ev.data.message);
+            // A part-specific failure (resume/letter/feedback) shouldn't be
+            // mistaken for a whole-run failure — collect it separately.
+            if (ev.data.part) {
+              setPartErrors((prev) => [...prev, ev.data.message]);
+            } else {
+              setError(ev.data.message);
+            }
             break;
         }
       });
@@ -223,6 +240,16 @@ export default function GeneratePage() {
 
         {error && <p className="mt-3 text-sm font-medium text-red-600">{error}</p>}
 
+        {partErrors.length > 0 && (
+          <div className="mt-3 flex flex-col gap-2">
+            {partErrors.map((msg, i) => (
+              <p key={i} className="text-sm font-medium text-red-600">
+                Part failed — {msg}
+              </p>
+            ))}
+          </div>
+        )}
+
         {showResults && (
           <div className="mt-4 flex flex-col gap-3">
             {rating !== null && <MatchRating rating={rating} />}
@@ -235,10 +262,10 @@ export default function GeneratePage() {
                 {usedMasterCv && (
                   <p className="mt-1 text-xs text-uber-gray">Master CV matched: {usedMasterCv}</p>
                 )}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {resume && <DownloadButton file={resume} label="Custom resume" />}
-                  {coverLetterPdf && <DownloadButton file={coverLetterPdf} label="Cover letter" />}
-                  {coverLetterTxt && <DownloadButton file={coverLetterTxt} label="Cover letter" />}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {resume && <Artifact file={resume} label="Custom resume" />}
+                  {coverLetterPdf && <Artifact file={coverLetterPdf} label="Cover letter" />}
+                  {coverLetterTxt && <Artifact file={coverLetterTxt} label="Cover letter" />}
                 </div>
               </div>
             )}
@@ -249,13 +276,16 @@ export default function GeneratePage() {
       <section className="rounded-lg border border-uber-line bg-background p-5">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-medium text-uber-black">Optional questions</h2>
-          <button
-            type="button"
-            onClick={addRow}
-            className="rounded-md bg-uber-black px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-uber-green"
-          >
-            + Add question
-          </button>
+          <div className="flex items-center gap-2">
+            {questionsProvider && <ProviderBadge provider={questionsProvider} />}
+            <button
+              type="button"
+              onClick={addRow}
+              className="rounded-md bg-uber-black px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-uber-green"
+            >
+              + Add question
+            </button>
+          </div>
         </div>
         <div className="mt-3 flex flex-col gap-3">
           {rows.length === 0 && <p className="text-sm text-uber-gray">No questions yet — e.g. “Why do you want to work here?”</p>}
@@ -315,7 +345,11 @@ export default function GeneratePage() {
 
       {letterText !== null && (
         <section className="rounded-lg border border-uber-line bg-background p-5">
-          <h2 className="text-sm font-medium text-uber-black">Cover letter preview</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-medium text-uber-black">Cover letter preview</h2>
+            <ProviderBadge provider={letterTextProvider} />
+            <CopyButton text={letterText} />
+          </div>
           <pre className="mt-3 whitespace-pre-wrap rounded-md border border-uber-line bg-white p-4 text-sm">
             {letterText}
           </pre>
@@ -324,7 +358,10 @@ export default function GeneratePage() {
 
       {feedback !== null && (
         <section className="rounded-lg border border-uber-line bg-background p-5">
-          <h2 className="text-sm font-medium text-uber-black">Feedback</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-medium text-uber-black">Feedback</h2>
+            <ProviderBadge provider={feedbackProvider} />
+          </div>
           <div className="mt-3 rounded-md border border-uber-line bg-white p-4">
             <ul className="space-y-2.5 text-sm text-uber-black">
               {feedback
@@ -343,6 +380,53 @@ export default function GeneratePage() {
       )}
     </div>
     </AuthGuard>
+  );
+}
+
+// Copy-to-clipboard button with a clipboard icon; flips to a checkmark when copied.
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleClick() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // silent: copy is a convenience, not critical
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      aria-label="Copy to clipboard"
+      title={copied ? "Copied" : "Copy to clipboard"}
+      className="ml-auto rounded-md border border-uber-line px-2 py-1.5 text-uber-gray transition-colors hover:border-uber-green hover:text-uber-green-dark"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        className="h-4 w-4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        {copied ? (
+          <>
+            <polyline points="20 6 9 17 4 12" />
+          </>
+        ) : (
+          <>
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </>
+        )}
+      </svg>
+    </button>
   );
 }
 
@@ -453,5 +537,38 @@ function DownloadButton({ file, label }: { file: GeneratedFile; label: string })
     >
       {busy ? "Fetching…" : `${label} · ${file.kind.toUpperCase()}`}
     </button>
+  );
+}
+
+// A download artifact + the badge showing which provider rendered it.
+function Artifact({ file, label }: { file: GeneratedFile; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <DownloadButton file={file} label={label} />
+      <ProviderBadge provider={file.provider} model={file.model} />
+    </span>
+  );
+}
+
+const PROVIDER_BADGE_STYLES: Record<string, string> = {
+  gemini: "border-blue-200 bg-blue-50 text-blue-700",
+  groq: "border-orange-200 bg-orange-50 text-orange-700",
+  openrouter: "border-purple-200 bg-purple-50 text-purple-700",
+  ollama: "border-green-200 bg-green-50 text-green-700",
+};
+
+// Small pill naming the model provider (Gemini / Groq / OpenRouter / Ollama)
+// that rendered the artifact next to it. Hidden when unknown (e.g. previews).
+function ProviderBadge({ provider, model }: { provider?: string; model?: string }) {
+  if (!provider) return null;
+  const label = provider === "openrouter" ? "OpenRouter" : provider.charAt(0).toUpperCase() + provider.slice(1);
+  const style = PROVIDER_BADGE_STYLES[provider] ?? "border-gray-200 bg-gray-50 text-gray-600";
+  return (
+    <span
+      title={model ? `Rendered by ${model}` : undefined}
+      className={`inline-flex items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium ${style}`}
+    >
+      {label}
+    </span>
   );
 }
