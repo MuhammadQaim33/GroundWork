@@ -22,7 +22,7 @@ Continuous job-search agent: discovers roles → screens against real resume →
 **Delivery:** Next.js/Vercel · Supabase (Postgres+pgvector) · GitHub Actions cron (every 2h) · Telegram digests (batched, threshold-gated) · Cloudflare Email Routing forward-in address per user (email-adapter path) · local sentence-transformers + local LLM core · BYOK for vision/voice.
 
 ## Where Things Live
-Data model → `schema.md` (RLS-scoped tables, FKs, relationships) · **TODO.md = today's agenda only** (agent input, not a log) · build plan, cut order, phase checkpoints, optional modules → `TODO.md`.
+Data model → `schema.md` (RLS-scoped tables, FKs, relationships) · **TODO.md = today's agenda only** (agent input, not a log) · build plan, cut order, phase checkpoints, optional modules → `TODO.md` · **All UI work (existing and new) must follow `style.md`** (the dionix.ai design system: fonts, colors, cards, buttons, section headers, textures).
 
 ## Non-Negotiables That Survive Scheduling (never cut)
 Grounding validator + eval CI · tag-based discovery + auto-grown ATS speed layer · DOM autofill with stop-at-submit · grounded interview prep · personal analytics correlation engine.
@@ -34,6 +34,7 @@ Grounding validator + eval CI · tag-based discovery + auto-grown ATS speed laye
 - **Comment all work done**: any code written or changed is commented.
 - **Report changes by file + function**: after implementing a feature, tell the user the file name and which function(s) were made/changed so they can follow along.
 - **No `_`-suffixed functions for public use**: a function used publicly (imported/called outside its defining module) must not carry a leading-underscore-style private marker. Reserve `_` naming for truly module-private helpers.
+- After every logical task or meaningful change, commit and push the changes to the Git remote; never force-push or rewrite history unless explicitly instructed.
 
 ## Risks
 - Browser agents break → DOM-first + vision fallback + hard step budgets; ATS layout drift caught by a fixture eval suite (saved real forms) measuring fill accuracy per ATS.
