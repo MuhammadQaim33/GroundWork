@@ -16,7 +16,7 @@ from pathlib import Path
 
 from compile import compile_pdf
 from errors import CompileError
-from llm import chat, fit_max_tokens
+from llm import MAX_OUT_TOKENS, active_provider, chat, fit_max_tokens
 
 FINE_TUNE_SYSTEM = (
     "You are a resume editor. Your only goal: maximize the chance this resume gets an "
@@ -26,10 +26,20 @@ FINE_TUNE_SYSTEM = (
     "Make only minimal keyword-level edits to better match the job description: "
     "surface relevant keywords that are already in the resume (matching the job's terminology), "
     "and swap a generic phrase for the job's keyword when it is an honest fit (e.g. "
-    "'built services' -> 'designed REST APIs'). You may add a skill ONLY if it appears in the "
-    "brag document. "
-    "NEVER invent experience, skills, or metrics that appear in neither the resume nor the "
-    "brag document. Every number must appear EXACTLY as written in the source. "
+    "'built services' -> 'designed REST APIs'). "
+    "EVERY technology keyword in the job description (e.g. Angular, React, PostgreSQL) must be "
+    "added to the resume even if the resume lacks it: always add it to the Skills section, and "
+    "add it to the Projects section by lightly editing ONE existing project line so the "
+    "technology is mentioned there naturally. "
+    "Mention each keyword only where it is genuinely relevant: a frontend framework belongs in "
+    "a frontend or full-stack project line, never in a backend description; a backend "
+    "technology belongs in a backend line. Never write react.js into a backend-only bullet. "
+    "Edits must read like the candidate's own writing — no stilted keyword stacking, no "
+    "unrelated pairings a recruiter would spot as machine-tailored. If no project line "
+    "plausibly fits the keyword, still add it to Skills but do not force it into an "
+    "irrelevant bullet. "
+    "NEVER invent experience, skills, metrics, or projects; the ONLY addition allowed is the "
+    "JD's technology keyword itself. Every number must appear EXACTLY as written in the source. "
     "Escape special characters in text (use \\& not &, \\% not %, \\_ not _, \\# not #). "
     "Keep the LaTeX valid. "
     "Respond with ONLY the .tex source code — no markdown fences, no commentary."
@@ -46,6 +56,16 @@ def extract_latex_document(text: str) -> str:
     if end:
         body = body[: end.end()]                  # stop right after \\end{document}
     return body
+
+
+def _ensure_documentclass(edited: str, master_tex: str) -> str:
+    """Make sure the model's output has a \\documentclass (splice the master's
+    preamble if it was dropped), else raise a clear error."""
+    if "documentclass" not in edited.lower():
+        edited = repair_missing_preamble(edited, master_tex)
+    if "documentclass" not in edited.lower():
+        raise CompileError("Model produced invalid LaTeX (no documentclass). Try again.")
+    return edited
 
 
 def repair_missing_preamble(model_output: str, master_tex: str) -> str:
@@ -85,6 +105,12 @@ def fine_tune(
 
     If error_hint is non-empty (a previous compile failed), it's appended so
     the model gets a chance to fix the exact LaTeX error.
+
+    Truncation guard: a fine-tuned resume is ~as long as the input, so it is
+    prone to being cut off at the token cap. An output with no \\end{document}
+    means truncation — we regenerate ONCE with a nudge and a bigger budget,
+    then fall back to splicing the master's closing tag (deterministic last
+    resort) so the compile step at least has a complete document.
     """
     user = (
         f"JOB DESCRIPTION:\n{job_description}\n\n"
@@ -97,15 +123,36 @@ def fine_tune(
             f"{error_hint[:1200]}\n\n"
             "Fix this LaTeX error. Output the complete corrected .tex source."
         )
-    max_tokens = fit_max_tokens(FINE_TUNE_SYSTEM, user, floor=3000)
+    # match_input=True: the answer is the resume itself (output ≈ input size),
+    # so on non-Groq providers ask for up to the input's length, not the floor.
+    max_tokens = fit_max_tokens(FINE_TUNE_SYSTEM, user, floor=3000, match_input=True)
     edited = clean_model_latex(
         chat(FINE_TUNE_SYSTEM, user, temperature=0.3, max_tokens=max_tokens).strip()
     )
-    # ponytail: LLM LaTeX may not compile — splice a dropped preamble, then fail loud.
-    if "documentclass" not in edited.lower():
-        edited = repair_missing_preamble(edited, master_tex)
-        if "documentclass" not in edited.lower():
-            raise CompileError("Model produced invalid LaTeX (no documentclass). Try again.")
+    edited = _ensure_documentclass(edited, master_tex)
+
+    if "\\end{document}" not in edited.lower():
+        # The answer was cut off before the closing tag — regenerate once with
+        # a nudge and (on non-Groq providers) the full output budget.
+        user += (
+            "\n\nYour previous answer was cut off before \\end{document}.\n"
+            "Output the COMPLETE corrected document, ending with \\end{document}."
+        )
+        if active_provider() == "groq":
+            bumped = fit_max_tokens(FINE_TUNE_SYSTEM, user, floor=max_tokens)
+        else:   # no TPM ceiling — give the regen the full cap so dense LaTeX fits
+            bumped = MAX_OUT_TOKENS
+        edited = clean_model_latex(
+            chat(FINE_TUNE_SYSTEM, user, temperature=0.3, max_tokens=bumped).strip()
+        )
+        edited = _ensure_documentclass(edited, master_tex)
+        if "\\end{document}" not in edited.lower():
+            # Last resort: borrow the master's closing tag. Compiles only if the
+            # cut happened after all environments closed; otherwise build_resume's
+            # compile-retry feeds the real error back to the model.
+            end_tag = re.search(r"\\end\{document\}", master_tex, re.IGNORECASE)
+            if end_tag:
+                edited += master_tex[end_tag.start():]
     return edited
 
 

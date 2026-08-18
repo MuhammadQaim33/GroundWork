@@ -154,7 +154,8 @@ def test_clean_model_latex_strips_fences_and_prose() -> None:
 
 def test_fine_tune_prompt_keyword_only_edits() -> None:
     """The resume-editor system prompt must contain the grounding promises
-    that make this a "keyword-only, never-fabricate" edit."""
+    that make this a "keyword-only, never-fabricate" edit, plus the rule that
+    every JD technology keyword is added to Skills and Projects naturally."""
     lower = FINE_TUNE_SYSTEM.lower()
     assert "never delete, condense, summarize, or rewrite a line" in lower
     assert "exactly as written" in lower
@@ -162,16 +163,53 @@ def test_fine_tune_prompt_keyword_only_edits() -> None:
     assert "interview call" in lower
     assert "never invent" in lower
     assert "escape special characters" in lower
+    assert "every technology keyword in the job description" in lower
+    assert "skills section" in lower
+    assert "projects section" in lower
+    assert "never write react.js into a backend-only bullet" in lower
+    assert "recruiter would spot as machine-tailored" in lower
 
 
 # --- Token-budget & retry tests ------------------------------------------------------
 
 def test_fit_max_tokens_non_groq_returns_floor_not_ceiling(monkeypatch) -> None:
-    """Non-Groq providers have no TPM ceiling, so we ask for only the floor â€”
+    """Non-Groq providers have no TPM ceiling, so we ask for only the floor —
     OpenRouter reserves max_tokens of credits per call."""
     monkeypatch.setattr("llm.active_provider", lambda: "openrouter")
     assert fit_max_tokens("system", "user", floor=800) == 800
     assert fit_max_tokens("system", "user", floor=3000) == 3000
+
+
+def test_fit_max_tokens_match_input_requests_output_big_as_input(monkeypatch) -> None:
+    """Transform-same-length tasks (resume fine-tuning: the answer IS the
+    resume, so output ≈ input) must be able to reproduce the whole input on
+    non-Groq providers, not just the floor."""
+    monkeypatch.setattr("llm.active_provider", lambda: "gemini")
+    # "user"*3000 → 12003 chars → est_input 4001 → ask for 4001, not the 800 floor.
+    assert fit_max_tokens("sys", "user" * 3000, floor=800, match_input=True) == 4001
+    # Default behavior unchanged: no match_input → floor only.
+    assert fit_max_tokens("sys", "user" * 3000, floor=800) == 800
+
+
+def test_fit_max_tokens_uses_active_models_budget(monkeypatch) -> None:
+    """The Groq guard must use the ACTIVE model's real TPM budget, not a global
+    constant. gpt-oss-120b allows only 8K TPM — a prompt that would pass an
+    older 11K budget must be rejected up front with a clear error, not a 413
+    (this is the 'Requested 18779, Limit 8000' failure)."""
+    from errors import TokenBudgetError
+
+    monkeypatch.setattr("llm.active_provider", lambda: "groq")
+    monkeypatch.setattr("llm.settings.llm_model", "openai/gpt-oss-120b")
+
+    # ~30K chars of LaTeX-ish input → est ~10K tokens > 8K budget → reject now.
+    big_input = "\\resumeItem{built x}\\resumeItem{built y} " * 800
+    try:
+        fit_max_tokens("sys", big_input, floor=800)
+        raise AssertionError("expected TokenBudgetError")
+    except TokenBudgetError:
+        pass
+    # A small input fits comfortably: it gets the full output cap.
+    assert fit_max_tokens("sys", "user", floor=800) == 5000
 
 
 def test_fine_tune_appends_compile_error_hint(monkeypatch) -> None:
@@ -233,6 +271,42 @@ def test_fine_tune_splices_master_preamble_when_documentclass_missing(monkeypatc
     assert "\\begin{document}" in out
     assert out.endswith("\\end{document}")
     assert "just prose" in out
+
+
+def test_fine_tune_regenerates_when_output_cut_off_before_end_document(monkeypatch) -> None:
+    """A model answer with \\documentclass but no \\end{document} means the output
+    was truncated at the token cap (the 'no legal \\end found' tectonic failure).
+    fine_tune must regenerate ONCE with a nudge instead of shipping a broken doc."""
+    calls = {"n": 0}
+
+    def fake_chat(system, user, temperature, max_tokens):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return "\\documentclass{article}\n\\begin{document}cut off mid-resume"
+        return "\\documentclass{article}\n\\begin{document}full resume\n\\end{document}"
+
+    monkeypatch.setattr("services.resume.chat", fake_chat)
+    monkeypatch.setattr("services.resume.fit_max_tokens", lambda *a, **k: 3000)
+    out = fine_tune(
+        "\\documentclass{article}\n\\begin{document}master\\end{document}", "brag", "JD"
+    )
+    assert calls["n"] == 2            # first attempt + one regeneration
+    assert out.endswith("\\end{document}")
+
+
+def test_fine_tune_splices_master_end_when_every_attempt_truncated(monkeypatch) -> None:
+    """If even the regeneration comes back without \\end{document}, splice the
+    master's closing tag as a deterministic last resort — the compile step then
+    has a complete document (and the build_resume retry loop can still feed a
+    real LaTeX error back to the model if the splice doesn't compile)."""
+    monkeypatch.setattr(
+        "services.resume.chat",
+        lambda *a, **k: "\\documentclass{article}\n\\begin{document}still cut off",
+    )
+    monkeypatch.setattr("services.resume.fit_max_tokens", lambda *a, **k: 3000)
+    master = "\\documentclass{article}\n\\begin{document}master\n\\end{document}"
+    out = fine_tune(master, "brag", "JD")
+    assert out.endswith("\\end{document}")   # master's closing tag spliced on
 
 
 def test_build_resume_regenerates_once_on_compile_failure(monkeypatch) -> None:
@@ -377,7 +451,8 @@ async def test_generate_stream_emits_each_expected_artifact(monkeypatch) -> None
     assert by["used_master_cv"][0] == {"used_master_cv": "cv.tex"}
     assert by["cover_letter_txt"][0]["kind"] == "text"
     assert "Dear team," in by["cover_letter_txt"][0]["text"]
-    assert by["feedback"][0] == {"rating": 8, "text": "- strong fit"}
+    # The badge field: mocked jobs call no LLM, so the provider is blank.
+    assert by["feedback"][0] == {"rating": 8, "text": "- strong fit", "provider": "", "model": ""}
 
 
 async def test_generate_stream_always_emits_feedback_even_when_not_requested(monkeypatch) -> None:
@@ -454,7 +529,9 @@ async def test_generate_stream_answers_questions_and_emits_event(monkeypatch) ->
     events = _parse_sse(await _collect_sse(stream))
     by = _sse_by_event(events)
     assert by["questions_answered"][0] == {
-        "answers": [{"question": "Why us?", "answer": "Because."}]
+        "answers": [{"question": "Why us?", "answer": "Because."}],
+        "provider": "",
+        "model": "",
     }
     # cover_letter receives only (jd, cv_name, name, links) — no answers arg.
     assert len(captured["args"]) == 4
